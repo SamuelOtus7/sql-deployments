@@ -18,11 +18,8 @@
   ==============================================================================*/
 
 SET NOCOUNT ON;
-SET XACT_ABORT ON;
 
 BEGIN TRY
-    BEGIN TRANSACTION;
-
     --==========================================================================
     -- 1. PRE-CHECKS (opcional)
     --==========================================================================
@@ -39,14 +36,10 @@ BEGIN TRY
     --==========================================================================
     -- Verificar se o objeto foi revertido corretamente, etc.
 
-    COMMIT TRANSACTION;
     PRINT 'SUCESSO: Rollback executado com sucesso.';
 
 END TRY
 BEGIN CATCH
-    IF @@TRANCOUNT > 0
-        ROLLBACK TRANSACTION;
-
     PRINT 'ERRO: ' + ERROR_MESSAGE();
     PRINT 'Linha: ' + CAST(ERROR_LINE() AS VARCHAR);
     PRINT 'Severidade: ' + CAST(ERROR_SEVERITY() AS VARCHAR);

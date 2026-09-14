@@ -37,9 +37,7 @@ Todo script deve incluir o cabeçalho padrão (ver `templates/forward-template.s
 
 ### Boas práticas obrigatórias
 - `SET NOCOUNT ON;` no início
-- `SET XACT_ABORT ON;` no início
 - `BEGIN TRY` / `BEGIN CATCH` com `THROW`
-- `BEGIN TRANSACTION` / `COMMIT` / `ROLLBACK`
 - Sem `SELECT *` em procedures
 - Sem `GRANT` ou `EXECUTE AS` sem justificativa
 

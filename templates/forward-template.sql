@@ -11,11 +11,8 @@
   ==============================================================================*/
 
 SET NOCOUNT ON;
-SET XACT_ABORT ON;
 
 BEGIN TRY
-    BEGIN TRANSACTION;
-
     --==========================================================================
     -- 1. PRE-CHECKS (opcional)
     --==========================================================================
@@ -33,14 +30,10 @@ BEGIN TRY
     -- Verificar se o objeto foi criado, se os dados estão corretos, etc.
     -- IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE name = '...') ...
 
-    COMMIT TRANSACTION;
     PRINT 'SUCESSO: Script executado com sucesso.';
 
 END TRY
 BEGIN CATCH
-    IF @@TRANCOUNT > 0
-        ROLLBACK TRANSACTION;
-
     PRINT 'ERRO: ' + ERROR_MESSAGE();
     PRINT 'Linha: ' + CAST(ERROR_LINE() AS VARCHAR);
     PRINT 'Severidade: ' + CAST(ERROR_SEVERITY() AS VARCHAR);
