@@ -15,3 +15,11 @@
 - **Commit:** 450ccb5
 - **DescriÃ§Ã£o:** Merge pull request #3 from SamuelOtus7/sql/CU-8888-teste-release
 - **Rollback:** Para reverter, usar a tag `r20260914-CU8888-450ccb5` e executar o script de rollback correspondente.
+
+## r20260914-SEM-CU-611d160
+
+- **Data:** 2026-09-14 18:53:08 +00:00
+- **Task ClickUp:** SEM-CU
+- **Commit:** 611d160
+- **DescriÃ§Ã£o:** chore: remove scripts de teste do release
+- **Rollback:** Para reverter, usar a tag `r20260914-SEM-CU-611d160` e executar o script de rollback correspondente.
