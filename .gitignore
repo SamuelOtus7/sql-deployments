@@ -19,6 +19,7 @@ scripts/qas-state.json
 scripts/manifest.json
 scripts/prod-audit.json
 scripts/prod-confirm.json
+scripts/smoke-log.json
 
 # Backup files (generated at deploy time)
 *.bak
