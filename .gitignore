@@ -22,6 +22,7 @@ scripts/prod-confirm.json
 scripts/smoke-log.json
 scripts/rollback-log.json
 scripts/impact-log.json
+scripts/review-log.json
 
 # Backup files (generated at deploy time)
 *.bak
