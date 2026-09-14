@@ -14,6 +14,14 @@ echo ""
 # Pega os arquivos staged
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
 
+# Se nao ha arquivos staged, pula validacao
+if [ -z "$STAGED_FILES" ]; then
+    echo ""
+    echo "=== PRE-COMMIT: Nenhum arquivo para validar ==="
+    echo "PRE-COMMIT: Aprovado."
+    exit 0
+fi
+
 # Lint SQL
 echo "--- Lint SQL ---"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$(git rev-parse --git-common-dir)/../tools/sql-lint.ps1" -Files $STAGED_FILES
