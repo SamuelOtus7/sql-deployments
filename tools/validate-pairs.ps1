@@ -11,7 +11,7 @@
     .\validate-pairs.ps1
 #>
 param(
-    [string[]]$Files
+    [string[]]$Files = @()
 )
 
 # Se nao passou arquivos, pega os staged

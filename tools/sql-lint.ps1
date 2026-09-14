@@ -13,7 +13,7 @@
     .\sql-lint.ps1 -Files scripts/forward/2026/09/001_forward_CU1234_teste.sql
 #>
 param(
-    [string[]]$Files
+    [string[]]$Files = @()
 )
 
 # Se nao passou arquivos, pega os staged
