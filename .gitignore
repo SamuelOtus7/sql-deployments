@@ -26,6 +26,7 @@ scripts/review-log.json
 scripts/dry-run-log.json
 scripts/validation-bypass-log.json
 scripts/validation-log.json
+scripts/drift-log.json
 
 # Backup files (generated at deploy time)
 *.bak
