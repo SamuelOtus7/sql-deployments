@@ -1,0 +1,46 @@
+# ===== SQL Deployments - Git Ignore =====
+
+# Credentials and secrets
+*.env
+.env
+.env.*
+**/secrets/**
+**/credentials/**
+*.pfx
+*.p12
+*.key
+*.pem
+connection-strings*.json
+mcp.json
+*.mcp.json
+
+# Local state files (not versioned - generated at runtime)
+scripts/qas-state.json
+scripts/manifest.json
+
+# Backup files (generated at deploy time)
+*.bak
+*.backup
+*_backup_*
+backup-*.sql
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/

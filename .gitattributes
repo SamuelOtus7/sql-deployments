@@ -1,0 +1,21 @@
+# ===== SQL Deployments - Git Attributes =====
+
+# Normalize line endings: CRLF on Windows checkout, LF in repo
+* text=auto eol=crlf
+
+# SQL files: text with CRLF (SQL Server convention)
+*.sql text eol=crlf
+
+# PowerShell scripts: text with CRLF
+*.ps1 text eol=crlf
+
+# JSON/YAML/Markdown: text with CRLF
+*.json text eol=crlf
+*.yaml text eol=crlf
+*.yml text eol=crlf
+*.md text eol=crlf
+
+# Binary files (never normalize)
+*.bak binary
+*.zip binary
+*.7z binary
