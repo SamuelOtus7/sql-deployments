@@ -1,0 +1,57 @@
+name: Release - Gerar Chave de Pesquisa
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+
+jobs:
+  generate-release:
+    name: Gerar chave + tag + changelog
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configurar Git
+        shell: powershell
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Gerar chave de pesquisa e atualizar changelog
+        shell: powershell
+        run: |
+          $env:GITHUB_TOKEN = "${{ secrets.GITHUB_TOKEN }}"
+          & ./tools/generate-key.ps1
+
+      - name: Commit changelog + push tag
+        shell: powershell
+        run: |
+          git add changelog/CHANGELOG.md
+          $hasChanges = git diff --cached --name-only
+          if ($hasChanges) {
+            git commit -m "chore: atualiza changelog com nova release [skip ci]"
+            git push
+          }
+          # Push das tags
+          git push --tags
+
+      - name: Resumo
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "==========================================" -ForegroundColor Cyan
+          Write-Host "  Release gerada automaticamente" -ForegroundColor Cyan
+          Write-Host "==========================================" -ForegroundColor Cyan
+          Write-Host ""
+          Write-Host "A chave de pesquisa foi gravada no changelog."
+          Write-Host "Copie a chave do changelog/CHANGELOG.md e cole na task do ClickUp."
+          Write-Host ""
