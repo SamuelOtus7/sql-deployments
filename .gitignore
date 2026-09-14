@@ -17,12 +17,15 @@ mcp.json
 # Local state files (not versioned - generated at runtime)
 scripts/qas-state.json
 scripts/manifest.json
+scripts/prod-audit.json
+scripts/prod-confirm.json
 
 # Backup files (generated at deploy time)
 *.bak
 *.backup
 *_backup_*
 backup-*.sql
+backups/
 
 # OS files
 Thumbs.db
