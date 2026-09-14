@@ -1,0 +1,66 @@
+name: CI - Validacao de Scripts SQL
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'tools/**'
+
+jobs:
+  lint-and-validate:
+    name: Lint SQL + Validacao de Pares
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar PowerShell
+        shell: powershell
+        run: Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+
+      - name: Identificar arquivos SQL alterados no PR
+        id: changed
+        shell: powershell
+        run: |
+          # Pega os arquivos alterados no PR
+          $files = git diff --name-only origin/main...HEAD
+          $sqlFiles = $files | Where-Object { $_ -match '\.sql$' -and $_ -notmatch 'templates[\\/]'}
+          $sqlFilesJson = $sqlFiles | ConvertTo-Json -Compress
+          Write-Host "Arquivos SQL alterados: $sqlFilesJson"
+          echo "sql_files=$sqlFilesJson" >> $env:GITHUB_OUTPUT
+
+      - name: Lint SQL
+        if: steps.changed.outputs.sql_files != '' && steps.changed.outputs.sql_files != 'null'
+        shell: powershell
+        run: |
+          $files = '${{ steps.changed.outputs.sql_files }}' | ConvertFrom-Json
+          if ($files -is [string]) { $files = @($files) }
+          & ./tools/sql-lint.ps1 -Files $files
+
+      - name: Validacao de Pares forward/rollback
+        if: steps.changed.outputs.sql_files != '' && steps.changed.outputs.sql_files != 'null'
+        shell: powershell
+        run: |
+          $files = '${{ steps.changed.outputs.sql_files }}' | ConvertFrom-Json
+          if ($files -is [string]) { $files = @($files) }
+          & ./tools/validate-pairs.ps1 -Files $files
+
+      - name: Resumo da validacao
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "==========================================" -ForegroundColor Cyan
+          Write-Host "  CI - Validacao de Scripts SQL" -ForegroundColor Cyan
+          Write-Host "==========================================" -ForegroundColor Cyan
+          Write-Host ""
+          Write-Host "Arquivos SQL validados: ${{ steps.changed.outputs.sql_files }}"
+          Write-Host ""
+          Write-Host "Regras aplicadas (framework Otus7):"
+          Write-Host "  - sql-fluxo-principal: SET NOCOUNT ON, TRY/CATCH, cabecalho"
+          Write-Host "  - sql-seguranca-tsql: sem SELECT *, sem UPDATE/DELETE sem WHERE"
+          Write-Host "  - sql-validacao-rollback: par forward/rollback obrigatorio"
+          Write-Host ""
