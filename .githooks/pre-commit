@@ -1,0 +1,42 @@
+#!/bin/sh
+# Pre-commit hook para sql-deployments
+# Executa lint SQL + validacao de pares forward/rollback antes do commit
+#
+# Regras incorporadas do framework Otus7:
+# - sql-fluxo-principal: SET NOCOUNT ON, TRY/CATCH, cabecalho com task ClickUp
+# - sql-seguranca-tsql: sem SELECT *, sem UPDATE/DELETE sem WHERE, sem MERGE sem justificativa
+# - sql-validacao-rollback: par forward/rollback obrigatorio, referencias cruzadas
+
+echo ""
+echo "=== PRE-COMMIT: Validando scripts SQL ==="
+echo ""
+
+# Pega os arquivos staged
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+
+# Lint SQL
+echo "--- Lint SQL ---"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$(git rev-parse --git-common-dir)/../tools/sql-lint.ps1" -Files $STAGED_FILES
+LINT_EXIT=$?
+
+if [ $LINT_EXIT -ne 0 ]; then
+    echo ""
+    echo "PRE-COMMIT: Lint falhou. Commit bloqueado." >&2
+    exit 1
+fi
+
+# Validacao de pares forward/rollback
+echo ""
+echo "--- Validacao de Pares ---"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$(git rev-parse --git-common-dir)/../tools/validate-pairs.ps1" -Files $STAGED_FILES
+PAIRS_EXIT=$?
+
+if [ $PAIRS_EXIT -ne 0 ]; then
+    echo ""
+    echo "PRE-COMMIT: Validacao de pares falhou. Commit bloqueado." >&2
+    exit 1
+fi
+
+echo ""
+echo "PRE-COMMIT: Todas as validacoes passaram." >&2
+exit 0
