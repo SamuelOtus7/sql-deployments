@@ -1,0 +1,61 @@
+﻿{
+  "version": "1.0",
+  "lastUpdated": null,
+  "description": "Registry de validacoes por processo. Cada entrada define quais validacoes devem rodar para um tipo de objeto. Se um objeto nao tem validacao registrada, o sistema notifica o Tech Lead e bloqueia a publicacao.",
+  "validations": [
+    {
+      "id": "V001",
+      "processType": "pagamento",
+      "description": "Validacao de pagamentos - regra financeira/logistica",
+      "objectPatterns": ["*pagamento*", "*fatura*", "*frete*", "*adiantamento*", "*conciliacao*", "*espelho*", "*desconto*", "*imposto*", "*nfse*", "*titulo*", "*extrato*", "*comprovante*"],
+      "objectTypes": ["PROCEDURE", "VIEW", "TABLE", "FUNCTION"],
+      "requiredDimensions": ["cliente", "transportadora", "periodo", "motorista", "rota"],
+      "validationQueries": [
+        {"name": "contagem_por_cliente", "description": "Verificar se o resultado tem dados por cliente", "query": "SELECT COUNT(DISTINCT cd_cliente) AS qt_clientes FROM ({placeholder_query}) sub"},
+        {"name": "contagem_por_transportadora", "description": "Verificar se o resultado tem dados por transportadora", "query": "SELECT COUNT(DISTINCT cd_transportadora) AS qt_transportadoras FROM ({placeholder_query}) sub"},
+        {"name": "contagem_por_periodo", "description": "Verificar se o resultado tem dados por periodo", "query": "SELECT COUNT(DISTINCT periodo) AS qt_periodos FROM ({placeholder_query}) sub"},
+        {"name": "contagem_por_motorista", "description": "Verificar se o resultado tem dados por motorista", "query": "SELECT COUNT(DISTINCT cd_motorista) AS qt_motoristas FROM ({placeholder_query}) sub"},
+        {"name": "contagem_por_rota", "description": "Verificar se o resultado tem dados por rota", "query": "SELECT COUNT(DISTINCT cd_rota) AS qt_rotas FROM ({placeholder_query}) sub"}
+      ],
+      "enabled": true,
+      "createdBy": "tech-lead",
+      "createdAt": "2026-09-14T18:20:00-03:00"
+    },
+    {
+      "id": "V002",
+      "processType": "rota",
+      "description": "Validacao de rotas - regra logistica",
+      "objectPatterns": ["*rota*", "*coleta*", "*km*", "*quilometragem*", "*trajeto*"],
+      "objectTypes": ["PROCEDURE", "VIEW", "TABLE", "FUNCTION"],
+      "requiredDimensions": ["transportadora", "periodo", "motorista", "rota", "base"],
+      "validationQueries": [
+        {"name": "contagem_por_transportadora", "description": "Verificar se o resultado tem dados por transportadora", "query": "SELECT COUNT(DISTINCT cd_transportadora) AS qt_transportadoras FROM ({placeholder_query}) sub"},
+        {"name": "contagem_por_periodo", "description": "Verificar se o resultado tem dados por periodo", "query": "SELECT COUNT(DISTINCT periodo) AS qt_periodos FROM ({placeholder_query}) sub"},
+        {"name": "contagem_por_motorista", "description": "Verificar se o resultado tem dados por motorista", "query": "SELECT COUNT(DISTINCT cd_motorista) AS qt_motoristas FROM ({placeholder_query}) sub"},
+        {"name": "contagem_por_rota", "description": "Verificar se o resultado tem dados por rota", "query": "SELECT COUNT(DISTINCT cd_rota) AS qt_rotas FROM ({placeholder_query}) sub"}
+      ],
+      "enabled": true,
+      "createdBy": "tech-lead",
+      "createdAt": "2026-09-14T18:20:00-03:00"
+    },
+    {
+      "id": "V003",
+      "processType": "pacote",
+      "description": "Validacao de pacotes - regra logistica",
+      "objectPatterns": ["*pacote*", "*transferencia*", "*circularidade*", "*entrega*"],
+      "objectTypes": ["PROCEDURE", "VIEW", "TABLE", "FUNCTION"],
+      "requiredDimensions": ["transportadora", "periodo", "motorista", "rota", "base"],
+      "validationQueries": [
+        {"name": "contagem_por_transportadora", "description": "Verificar se o resultado tem dados por transportadora", "query": "SELECT COUNT(DISTINCT cd_transportadora) AS qt_transportadoras FROM ({placeholder_query}) sub"},
+        {"name": "contagem_por_periodo", "description": "Verificar se o resultado tem dados por periodo", "query": "SELECT COUNT(DISTINCT periodo) AS qt_periodos FROM ({placeholder_query}) sub"},
+        {"name": "contagem_por_motorista", "description": "Verificar se o resultado tem dados por motorista", "query": "SELECT COUNT(DISTINCT cd_motorista) AS qt_motoristas FROM ({placeholder_query}) sub"},
+        {"name": "contagem_por_rota", "description": "Verificar se o resultado tem dados por rota", "query": "SELECT COUNT(DISTINCT cd_rota) AS qt_rotas FROM ({placeholder_query}) sub"}
+      ],
+      "enabled": true,
+      "createdBy": "tech-lead",
+      "createdAt": "2026-09-14T18:20:00-03:00"
+    }
+  ],
+  "authorizedEditors": ["tech-lead", "samuel.nogueira"],
+  "authorizedBypass": ["tech-lead"]
+}
