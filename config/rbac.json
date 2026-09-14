@@ -1,0 +1,91 @@
+﻿{
+  "version": "1.0",
+  "description": "RBAC - Controle de permissoes do processo de publicacao SQL",
+  "roles": {
+    "developer": {
+      "description": "Desenvolvedor padrao - pode desenvolver, commitar, abrir PR, solicitar publicacao",
+      "permissions": [
+        "create-branch",
+        "commit",
+        "open-pr",
+        "request-publish-qas",
+        "request-publish-prod",
+        "view-validations",
+        "view-status"
+      ]
+    },
+    "validation-architect": {
+      "description": "Pode criar e editar validacoes de negocio no registry",
+      "permissions": [
+        "create-branch",
+        "commit",
+        "open-pr",
+        "request-publish-qas",
+        "request-publish-prod",
+        "view-validations",
+        "view-status",
+        "create-validation",
+        "edit-validation",
+        "delete-validation"
+      ]
+    },
+    "bypass-validation": {
+      "description": "Pode publicar sem validacao de negocio cadastrada (com log de auditoria)",
+      "permissions": [
+        "create-branch",
+        "commit",
+        "open-pr",
+        "request-publish-qas",
+        "request-publish-prod",
+        "view-validations",
+        "view-status",
+        "publish-without-validation"
+      ]
+    },
+    "tech-lead": {
+      "description": "Tech Lead - recebe notificacoes de objetos sem validacao, pode aprovar excecoes",
+      "permissions": [
+        "create-branch",
+        "commit",
+        "open-pr",
+        "merge-pr",
+        "request-publish-qas",
+        "request-publish-prod",
+        "view-validations",
+        "view-status",
+        "create-validation",
+        "edit-validation",
+        "approve-validation-exception",
+        "publish-without-validation"
+      ]
+    },
+    "admin": {
+      "description": "Administrador - todas as permissoes",
+      "permissions": [
+        "create-branch",
+        "commit",
+        "open-pr",
+        "merge-pr",
+        "request-publish-qas",
+        "request-publish-prod",
+        "view-validations",
+        "view-status",
+        "create-validation",
+        "edit-validation",
+        "delete-validation",
+        "approve-validation-exception",
+        "publish-without-validation",
+        "manage-rbac",
+        "rollback-any"
+      ]
+    }
+  },
+  "users": {
+    "samuel.nogueira": ["developer", "bypass-validation"], "Samuel Nogueira": ["developer", "bypass-validation"],
+    "tech.lead@otus7": ["tech-lead", "validation-architect"],
+    "admin@otus7": ["admin"]
+  },
+  "notify_on_missing_validation": ["tech-lead"],
+  "audit_log": "changelog/AUDIT_LOG.md"
+}
+
