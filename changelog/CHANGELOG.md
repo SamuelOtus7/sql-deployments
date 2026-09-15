@@ -39,3 +39,11 @@
 - **Commit:** 35e4e1b
 - **DescriÃ§Ã£o:** CU-86akezk2w: ajusta DataReferencia de rotas fechadas (#4)
 - **Rollback:** Para reverter, usar a tag `r20260915-CU86-35e4e1b` e executar o script de rollback correspondente.
+
+## r20260915-CU86-fe742ad
+
+- **Data:** 2026-09-15 21:42:18 +00:00
+- **Task ClickUp:** CU86
+- **Commit:** fe742ad
+- **DescriÃ§Ã£o:** CU-86akezk2w: condiciona ajuste de DataReferencia ao parametro reverter_data_ref_rota_fechada. (#5)
+- **Rollback:** Para reverter, usar a tag `r20260915-CU86-fe742ad` e executar o script de rollback correspondente.
