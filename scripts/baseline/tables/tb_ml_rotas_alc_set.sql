@@ -1,0 +1,82 @@
+﻿-- ============================================================
+-- BASELINE: dbo.tb_ml_rotas_alc_set
+-- Tipo: Table
+-- Schema: dbo
+-- Origem: Dump SSMS db_Irisys.sql (14/09/2026)
+-- ============================================================
+/****** Object:  Table [dbo].[tb_ml_rotas_alc_set]    Script Date: 14/09/2026 12:12:52 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[tb_ml_rotas_alc_set](
+	[Id] [int] IDENTITY(1,1) NOT NULL,
+	[IdRota] [int] NOT NULL,
+	[DataReferencia] [date] NOT NULL,
+	[DataHoraColeta] [datetime] NOT NULL,
+	[DataColeta] [date] NULL,
+	[ServiceCenter] [varchar](50) NOT NULL,
+	[OrigemSaida] [varchar](50) NULL,
+	[TipoOrigemSaida] [varchar](50) NULL,
+	[Tipo] [varchar](30) NULL,
+	[TipoRota] [varchar](10) NULL,
+	[StatusRota] [varchar](50) NOT NULL,
+	[SubStatusRota] [varchar](50) NULL,
+	[TipoEntrega] [varchar](30) NOT NULL,
+	[IdTransportadora] [int] NOT NULL,
+	[DataHoraInicio] [datetime] NOT NULL,
+	[DataHoraFim] [datetime] NULL,
+	[TotalPacotes] [smallint] NOT NULL,
+	[PacotesEntregues] [smallint] NOT NULL,
+	[PacotesNaoEntregue] [smallint] NOT NULL,
+	[PacotesPendentes] [smallint] NOT NULL,
+	[PacotesEntreguesForaAreaEntrega] [smallint] NOT NULL,
+	[PacotesTransferidos] [smallint] NOT NULL,
+	[PacotesRecebidos] [smallint] NOT NULL,
+	[TotalSacas] [smallint] NOT NULL,
+	[QuantidadeAmbulancia] [tinyint] NOT NULL,
+	[StatusPrazo] [varchar](30) NULL,
+	[NomeMotorista] [varchar](100) NOT NULL,
+	[NivelExperienciaMotorista] [varchar](40) NULL,
+	[MotoristaArriscado] [bit] NOT NULL,
+	[QuantidadeReclamacoesMotorista] [int] NULL,
+	[TaxaDeContatoMotorista] [decimal](7, 4) NULL,
+	[IdNivelMotorista] [varchar](30) NULL,
+	[NivelMotorista] [varchar](30) NULL,
+	[QuantidadePacotesTransportados] [int] NULL,
+	[PercentualEntregasBemSucedidas] [decimal](5, 4) NULL,
+	[PercentualEntregasSemRelamacaoes] [decimal](5, 4) NULL,
+	[PossuiAjudante] [bit] NOT NULL,
+	[TipoVeiculo] [varchar](100) NULL,
+	[Placa] [varchar](10) NOT NULL,
+	[TempoPlanejadoMinutos] [int] NULL,
+	[PercentualProgresso] [decimal](8, 4) NULL,
+	[KmTotal] [decimal](8, 4) NULL,
+	[TempoEmRota] [int] NOT NULL,
+	[TempoChegadaAreaEntrega] [int] NOT NULL,
+	[TempoAreaEntrega] [int] NOT NULL,
+	[TempoRetornoCentroDistribuicao] [int] NOT NULL,
+	[TempoInativo] [int] NULL,
+	[DataAtualizacao] [datetime] NULL,
+	[Excluido] [bit] NULL,
+	[QuantidadePontos] [smallint] NOT NULL,
+	[QuantidadeParadas] [smallint] NOT NULL,
+	[DataUltimaAtualizacaoPacote] [datetime] NULL,
+	[DataPrimeiraEntrega] [datetime] NULL,
+	[LinkMapa] [varchar](1000) NULL,
+	[StatusPrimeiraEntrega] [varchar](50) NULL,
+	[StatusSegundaEntrega] [varchar](50) NULL,
+	[QuantidadeReclamacoes] [int] NOT NULL,
+	[KmColetado] [decimal](10, 5) NOT NULL,
+	[DataUltimaEntrega] [datetime] NULL,
+	[KmColetadoApp] [decimal](10, 5) NULL,
+	[LinkMapaApp] [varchar](1000) NULL,
+	[KmColetadoGeo] [decimal](10, 5) NULL,
+	[LinkMapaGeo] [varchar](1000) NULL,
+	[Cidades] [varchar](1000) NULL,
+	[CidadeReferencia] [varchar](150) NULL,
+	[Ambulancia] [bit] NULL,
+	[OrigemSaidaAmbulancia] [varchar](50) NULL,
+	[KmMotorista] [decimal](8, 4) NULL
+) ON [PRIMARY]
+GO

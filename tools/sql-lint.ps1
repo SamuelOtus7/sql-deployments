@@ -27,6 +27,8 @@ $Files = $Files | Where-Object { $_ -match '\.sql$' }
 
 # Ignora arquivos de template (nao sao scripts de producao)
 $Files = $Files | Where-Object { $_ -notmatch 'templates[\\/]'}
+# Ignora arquivos de baseline (sao a versao inicial do banco, nao scripts de task)
+$Files = $Files | Where-Object { $_ -notmatch 'baseline[\\/]'}
 
 if (-not $Files -or $Files.Count -eq 0) {
     Write-Host "LINT: Nenhum arquivo .sql para validar." -ForegroundColor DarkGray

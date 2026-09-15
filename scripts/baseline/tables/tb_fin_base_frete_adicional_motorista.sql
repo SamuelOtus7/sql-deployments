@@ -1,0 +1,112 @@
+﻿-- ============================================================
+-- BASELINE: dbo.tb_fin_base_frete_adicional_motorista
+-- Tipo: Table
+-- Schema: dbo
+-- Origem: Dump SSMS db_Irisys.sql (14/09/2026)
+-- ============================================================
+/****** Object:  Table [dbo].[tb_fin_base_frete_adicional_motorista]    Script Date: 14/09/2026 12:12:47 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[tb_fin_base_frete_adicional_motorista](
+	[bfa_cd_base_frete_adicional_motorista] [int] IDENTITY(1,1) NOT NULL,
+	[bfa_cd_transportadora] [int] NOT NULL,
+	[bfa_cd_service_center] [varchar](50) NULL,
+	[bfa_nm_cidade] [varchar](150) NULL,
+	[bfa_cd_tipo_veiculo] [int] NOT NULL,
+	[bfa_tipo_adicional_domingo] [tinyint] NOT NULL,
+	[bfa_vl_adicional_domingo] [decimal](7, 2) NOT NULL,
+	[bfa_tipo_adicional_ciclo_pm] [tinyint] NOT NULL,
+	[bfa_vl_adicional_ciclo_pm] [decimal](7, 2) NOT NULL,
+	[bfa_vl_paradas0_60] [decimal](5, 2) NULL,
+	[bfa_vl_paradas61_75] [decimal](5, 2) NULL,
+	[bfa_vl_paradas76_85] [decimal](5, 2) NULL,
+	[bfa_vl_paradas86_90] [decimal](5, 2) NULL,
+	[bfa_vl_paradas_acima_90] [decimal](7, 2) NULL,
+	[bfa_tipo_adicional_ajudante] [tinyint] NULL,
+	[bfa_vl_adicional_ajudante] [decimal](7, 2) NULL,
+	[bfa_tipo_adicional_risco] [tinyint] NULL,
+	[bfa_vl_adicional_risco] [decimal](7, 2) NULL,
+	[bfa_calcula_por_parada] [bit] NULL,
+	[bfa_vl_adicional] [decimal](7, 2) NULL,
+	[bfa_tipo_adicional_pool] [int] NULL,
+	[bfa_cd_tipo_contrato] [int] NULL,
+	[bfa_tipo_insucesso] [tinyint] NULL,
+	[bfa_cd_insucesso] [tinyint] NULL,
+	[bfa_vl_insucesso] [decimal](7, 2) NULL,
+	[bfa_cd_dias_insentos] [varchar](50) NULL,
+	[bfa_cd_pacote_ajudante] [decimal](7, 2) NULL,
+	[bfa_cd_pacote_ajudante_area_risco] [decimal](7, 2) NULL,
+	[bfa_cd_codigo_cliente] [int] NULL,
+	[bfa_vl_adicional_recarga] [decimal](7, 2) NULL,
+	[bfa_vl_sdd] [decimal](18, 2) NULL,
+	[bfa_vl_adicional_km100] [decimal](18, 2) NULL,
+	[bfa_tipo_adicional_recarga] [int] NULL,
+	[bfa_vl_qtd_pacote] [int] NULL,
+	[bfa_qtd_pacote] [int] NULL,
+	[bfa_vl_bonus_ds] [decimal](10, 2) NULL,
+	[bfa_tipo_desconto_flex_frota] [bit] NULL,
+	[bfa_vl_valor_desconto_flex_frota] [decimal](7, 2) NULL,
+	[bfa_tipo_desconto_cartao_flex_frota] [bit] NULL,
+	[bfa_vl_valor_desconto_cartao_flex_frota] [decimal](7, 2) NULL,
+	[bfa_data_inicio_vigencia] [date] NOT NULL,
+	[bfa_data_fim_vigencia] [date] NULL,
+	[bfa_tipo_adicional_feriado] [tinyint] NULL,
+	[bfa_vl_adicional_feriado] [decimal](18, 2) NULL,
+	[bfa_cd_operacao] [int] NOT NULL,
+	[ValidFrom] [datetime2](7) GENERATED ALWAYS AS ROW START NOT NULL,
+	[ValidTo] [datetime2](7) GENERATED ALWAYS AS ROW END NOT NULL,
+	[bfa_in_bonus_ds] [bit] NULL,
+	[bfa_tx_bonus_ds] [decimal](10, 2) NULL,
+	[bfa_ds_tipo_adicional_KM] [varchar](80) NULL,
+	[bfa_vl_valor_inicio_KM] [int] NULL,
+	[bfa_vl_valor_final_KM] [int] NULL,
+	[bfa_vl_valor_km_rodado] [decimal](7, 2) NULL,
+	[bfa_ds_referenciaDS] [int] NULL,
+	[bfa_calcula_por_parada_nome] [varchar](80) NULL,
+	[bfa_cd_ambulancia_primeira_faixa] [int] NULL,
+	[bfa_perc_ds] [decimal](10, 2) NULL,
+	[bfa_tipo_bonus_ds] [varchar](50) NULL,
+	[bfa_tipo_adicional_faixa] [int] NULL,
+	[bfa_qtd_enderecos_nao_visitados] [int] NULL,
+	[bfa_qtd_pacote_ambulancia] [int] NULL,
+	[bfa_vl_pacote_ambulancia] [decimal](10, 2) NULL,
+	[bfa_vl_adicional_pedagio] [decimal](10, 2) NULL,
+	[bfa_adicional_pct_min] [int] NULL,
+	[bfa_vl_pct_min] [decimal](10, 2) NULL,
+	[bfa_perc_sla] [decimal](10, 2) NULL,
+	[bfa_tipo_bonus_sla] [int] NULL,
+	[bfa_vl_bonus_sla] [decimal](10, 2) NULL,
+	[bfa_tipo_adicional_pct_min] [int] NULL,
+	[bfa_pacotes_min_adicional_risco] [int] NULL,
+	[bfa_pacotes_max_adicional_risco] [int] NULL,
+	[bfa_tipo_adicional_rota] [int] NULL,
+	[bfa_vl_adicional_rota] [decimal](7, 2) NULL,
+	[bfa_tipo_adicional_ajudante_dom] [int] NULL,
+	[bfa_vl_adicional_ajudante_dom] [decimal](10, 2) NULL,
+	[bfa_tipo_adicional] [int] NULL,
+	[bfa_zera_adicional_ambulancia] [bit] NULL,
+	[bfa_ds_placa] [varchar](20) NULL,
+ CONSTRAINT [pk_tb_fin_base_frete_adicional_motorista] PRIMARY KEY CLUSTERED 
+(
+	[bfa_cd_base_frete_adicional_motorista] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+ CONSTRAINT [UQ_tb_fin_base_frete_adicional_motorista] UNIQUE NONCLUSTERED 
+(
+	[bfa_cd_transportadora] ASC,
+	[bfa_cd_tipo_contrato] ASC,
+	[bfa_cd_service_center] ASC,
+	[bfa_nm_cidade] ASC,
+	[bfa_cd_tipo_veiculo] ASC,
+	[bfa_data_inicio_vigencia] ASC,
+	[bfa_cd_operacao] ASC,
+	[bfa_ds_placa] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+	PERIOD FOR SYSTEM_TIME ([ValidFrom], [ValidTo])
+) ON [PRIMARY]
+WITH
+(
+SYSTEM_VERSIONING = ON (HISTORY_TABLE = [dbo].[tb_fin_base_frete_adicional_motorista_hist])
+)
+GO
