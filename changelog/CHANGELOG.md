@@ -23,3 +23,11 @@
 - **Commit:** 611d160
 - **DescriÃ§Ã£o:** chore: remove scripts de teste do release
 - **Rollback:** Para reverter, usar a tag `r20260914-SEM-CU-611d160` e executar o script de rollback correspondente.
+
+## r20260915-SEM-CU-16ad17f
+
+- **Data:** 2026-09-15 12:20:49 +00:00
+- **Task ClickUp:** SEM-CU
+- **Commit:** 16ad17f
+- **DescriÃ§Ã£o:** feat: baseline completa do banco db_Irisys (1700 objetos)
+- **Rollback:** Para reverter, usar a tag `r20260915-SEM-CU-16ad17f` e executar o script de rollback correspondente.
