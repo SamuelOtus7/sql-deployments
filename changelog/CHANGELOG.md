@@ -31,3 +31,11 @@
 - **Commit:** 16ad17f
 - **DescriÃ§Ã£o:** feat: baseline completa do banco db_Irisys (1700 objetos)
 - **Rollback:** Para reverter, usar a tag `r20260915-SEM-CU-16ad17f` e executar o script de rollback correspondente.
+
+## r20260915-CU86-35e4e1b
+
+- **Data:** 2026-09-15 21:32:45 +00:00
+- **Task ClickUp:** CU86
+- **Commit:** 35e4e1b
+- **DescriÃ§Ã£o:** CU-86akezk2w: ajusta DataReferencia de rotas fechadas (#4)
+- **Rollback:** Para reverter, usar a tag `r20260915-CU86-35e4e1b` e executar o script de rollback correspondente.
