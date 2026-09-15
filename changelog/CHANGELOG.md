@@ -47,3 +47,11 @@
 - **Commit:** fe742ad
 - **DescriÃ§Ã£o:** CU-86akezk2w: condiciona ajuste de DataReferencia ao parametro reverter_data_ref_rota_fechada. (#5)
 - **Rollback:** Para reverter, usar a tag `r20260915-CU86-fe742ad` e executar o script de rollback correspondente.
+
+## r20260915-CU86-5d04014
+
+- **Data:** 2026-09-15 21:58:14 +00:00
+- **Task ClickUp:** CU86
+- **Commit:** 5d04014
+- **DescriÃ§Ã£o:** CU-86akezk2w: remove filtro p.DataReferencia = r.DataReferencia do ajuste de rota fechada. (#6)
+- **Rollback:** Para reverter, usar a tag `r20260915-CU86-5d04014` e executar o script de rollback correspondente.
