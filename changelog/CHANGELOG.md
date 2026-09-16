@@ -55,3 +55,11 @@
 - **Commit:** 5d04014
 - **DescriÃ§Ã£o:** CU-86akezk2w: remove filtro p.DataReferencia = r.DataReferencia do ajuste de rota fechada. (#6)
 - **Rollback:** Para reverter, usar a tag `r20260915-CU86-5d04014` e executar o script de rollback correspondente.
+
+## r20260916-CU86-2ce9a19
+
+- **Data:** 2026-09-16 13:58:54 +00:00
+- **Task ClickUp:** CU86
+- **Commit:** 2ce9a19
+- **DescriÃ§Ã£o:** CU-86ak5qxm4: exclui pacotes transferred do TotalPacotes em tb_ml_rotas (#7)
+- **Rollback:** Para reverter, usar a tag `r20260916-CU86-2ce9a19` e executar o script de rollback correspondente.
