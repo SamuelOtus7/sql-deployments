@@ -22,9 +22,14 @@ if [ -z "$STAGED_FILES" ]; then
     exit 0
 fi
 
+# Junta arquivos em CSV: -Files com args separados por espaco so liga o primeiro
+elemento ao parametro [string[]]; a forma "a,b,c" e parseada como array.
+STAGED_CSV=$(printf '%s' "$STAGED_FILES" | tr '
+' ',' | sed 's/,$//')
+
 # Lint SQL
 echo "--- Lint SQL ---"
-powershell -NoProfile -ExecutionPolicy Bypass -File "$(git rev-parse --git-common-dir)/../tools/sql-lint.ps1" -Files $STAGED_FILES
+powershell -NoProfile -ExecutionPolicy Bypass -File "$(git rev-parse --git-common-dir)/../tools/sql-lint.ps1" -Files "$STAGED_CSV"
 LINT_EXIT=$?
 
 if [ $LINT_EXIT -ne 0 ]; then
@@ -36,7 +41,7 @@ fi
 # Validacao de pares forward/rollback
 echo ""
 echo "--- Validacao de Pares ---"
-powershell -NoProfile -ExecutionPolicy Bypass -File "$(git rev-parse --git-common-dir)/../tools/validate-pairs.ps1" -Files $STAGED_FILES
+powershell -NoProfile -ExecutionPolicy Bypass -File "$(git rev-parse --git-common-dir)/../tools/validate-pairs.ps1" -Files "$STAGED_CSV"
 PAIRS_EXIT=$?
 
 if [ $PAIRS_EXIT -ne 0 ]; then
