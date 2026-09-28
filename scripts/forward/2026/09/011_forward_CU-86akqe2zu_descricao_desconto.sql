@@ -13,6 +13,7 @@
                    - ppr_cd_desconto_sd = 1 -> 'Not Visit' (regra NOT_VISIT)
                    - ppr_lcto_observacao com 'Vehicle Daily Not Visited' ->
                      'Vehicle Daily Not Visited' (desconto de prefatura)
+                   - ppr_lcto_observacao com 'Pnr' -> 'PNR' (prefatura)
                    - ppr_lcto_observacao com 'Lost' -> 'Lost' (prefatura)
                    - demais casos -> 'Desconto' (fallback generico)
                  O CASE e replicado no GROUP BY, conforme estrutura original.
@@ -144,6 +145,8 @@ SELECT
                                             THEN '' Not Visit: R$ ''
                                         WHEN a.ppr_lcto_observacao LIKE ''%Vehicle Daily Not Visited%''
                                             THEN '' Vehicle Daily Not Visited: R$ ''
+                                        WHEN a.ppr_lcto_observacao LIKE ''%Pnr%''
+                                            THEN '' PNR: R$ ''
                                         WHEN a.ppr_lcto_observacao LIKE ''%Lost%''
                                             THEN '' Lost: R$ ''
                                         ELSE '' Desconto: R$ '' 
@@ -329,6 +332,8 @@ WHERE a.ppr_in_excluido = 0
                                             THEN '' Not Visit: R$ ''
                                         WHEN a.ppr_lcto_observacao LIKE ''%Vehicle Daily Not Visited%''
                                             THEN '' Vehicle Daily Not Visited: R$ ''
+                                        WHEN a.ppr_lcto_observacao LIKE ''%Pnr%''
+                                            THEN '' PNR: R$ ''
                                         WHEN a.ppr_lcto_observacao LIKE ''%Lost%''
                                             THEN '' Lost: R$ ''
                                         ELSE '' Desconto: R$ '' 
