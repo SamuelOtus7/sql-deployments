@@ -4,14 +4,16 @@
   Task ClickUp : CU-86akjfupg
   Autor        : Devin
   Data         : 2026-09-29
-  Descrição    : Reverte o forward 011: recria vw_pacotes e vw_saas_pacotes sem a
-                 coluna TipoRota (definicao vigente anterior a CU-86akjfupg,
-                 identica ao baseline de 14/09/2026).
+  Descrição    : Reverte o forward 011: recria vw_pacotes e vw_saas_pacotes com a
+                 definicao anterior (label fixo 'Coletado em Rota', sem consulta
+                 a tb_ml_status_entrega_traducao e sem o join extra de
+                 tb_clientes em vw_saas_pacotes) e remove o seed
+                 TenantID 27 / 'coletado_em_rota'.
   Forward ref  : scripts/forward/2026/09/011_forward_CU-86akjfupg_tipo_rota_coleta.sql
-  Objetos      : dbo.vw_pacotes, dbo.vw_saas_pacotes
+  Objetos      : dbo.vw_pacotes, dbo.vw_saas_pacotes, dbo.tb_ml_status_entrega_traducao (DELETE)
   ==============================================================================
-  ATENÇÃO: Este script reverte EXATAMENTE o que o forward fez (remocao da coluna
-  TipoRota das duas views, via recriacao com a definicao anterior).
+  ATENÇÃO: Este script reverte EXATAMENTE o que o forward fez (views restauradas
+  a definicao anterior e remocao do seed inserido).
   ==============================================================================*/
 
 SET NOCOUNT ON;
@@ -32,7 +34,7 @@ END CATCH;
 GO
 
 --============================================================================
--- 2. SCRIPT DE ROLLBACK (definicao original, sem a coluna TipoRota)
+-- 2. SCRIPT DE ROLLBACK (definicao original das views)
 --============================================================================
 
 CREATE OR ALTER view [dbo].[vw_pacotes]
@@ -179,17 +181,25 @@ GO
 
 BEGIN TRY
     --==========================================================================
-    -- 3. POS-CHECKS
+    -- 3. REMOVE SEED inserido pelo forward
     --==========================================================================
+    DELETE FROM tb_ml_status_entrega_traducao
+    WHERE TenantID = 27 AND StatusEntrega = 'coletado_em_rota' AND SubStatus IS NULL;
+
+    --==========================================================================
+    -- 4. POS-CHECKS
+    --==========================================================================
+    IF EXISTS (SELECT 1 FROM tb_ml_status_entrega_traducao WHERE TenantID = 27 AND StatusEntrega = 'coletado_em_rota')
+        THROW 50006, 'Seed TenantID 27 ainda existe em tb_ml_status_entrega_traducao.', 1;
     IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.vw_pacotes') AND name = 'TipoRota')
-        THROW 50003, 'Coluna TipoRota ainda existe em dbo.vw_pacotes.', 1;
-    IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.vw_saas_pacotes') AND name = 'TipoRota')
-        THROW 50004, 'Coluna TipoRota ainda existe em dbo.vw_saas_pacotes.', 1;
+        THROW 50007, 'Coluna TipoRota ainda existe em dbo.vw_pacotes.', 1;
 
     PRINT 'SUCESSO: Rollback executado com sucesso.';
 END TRY
 BEGIN CATCH
-    PRINT 'ERRO (pos-check): ' + ERROR_MESSAGE();
+    PRINT 'ERRO: ' + ERROR_MESSAGE();
+    PRINT 'Linha: ' + CAST(ERROR_LINE() AS VARCHAR);
+    PRINT 'Severidade: ' + CAST(ERROR_SEVERITY() AS VARCHAR);
     THROW;
 END CATCH;
 GO
