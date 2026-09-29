@@ -11,8 +11,11 @@
                  DataExtracao/CodigoCliente).
                  Destino: dbo.tb_pnr_bsc (tabela tratada, freshness por
                  pnr_dh_criacao, data de negócio pnr_dh_ocorrencia).
-                 Habilitação por cliente segue o parâmetro 'Habilitar PNR BSC'
-                 (tb_parametros, categoria 'Financeiro - Pagamentos').
+                 Habilitação por cliente segue o parâmetro 'Km RTT'
+                 (tb_parametros, categoria 'Alertas') — apenas clientes com
+                 RTT habilitado têm a coleta PNR monitorada.
+                 Tolerância de freshness: D-1 (nr_lag_dias_negocio=1;
+                 janela D-1 implementada no forward 012).
   Rollback     : scripts/rollback/2026/09/011_rollback_CU-86ak71ymk.sql
   Objetos      : INSERT em dbo.tb_pbi_mon_processo (processo_codigo LOOKER_PNR)
   Dependências : tb_looker_pnr, tb_pnr_bsc, USPTrataStagingPNRBSC,
@@ -96,11 +99,11 @@ BEGIN TRY
             , 'pnr_cd_cliente'                              -- destino_col_transportadora
             , 'pnr_dh_criacao'                              -- destino_col_freshness
             , 'pnr_dh_criacao'                              -- destino_col_etl
-            , 2                                             -- nr_lag_dias_negocio
+            , 1                                             -- nr_lag_dias_negocio
             , '08:00'                                       -- hr_validacao
             , 'cli_id_logistics'                            -- id_cliente_campo
             , 5                                             -- sla_minutos
-            , N'Habilitar PNR BSC'                          -- parametro_habilita
+            , N'Km RTT'                                     -- parametro_habilita
             , 1                                             -- in_ativo
             , N'A coleta de dados nao trouxe registros de hoje.'  -- ds_acao_origem
             , N'Os dados de hoje ainda nao foram carregados.'     -- ds_acao_destino

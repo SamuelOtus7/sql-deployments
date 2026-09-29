@@ -11,6 +11,10 @@
                  CodigoCliente -> tb_clientes.cli_id_logistics, DataExtracao).
                  Destino: MetricasDestino <- tb_pnr_bsc (pnr_cd_cliente ->
                  tb_clientes.cli_id_logistics, freshness pnr_dh_criacao).
+                 Freshness D-1: os dois ramos contam registros de ontem+hoje
+                 (>= DATEADD(DAY,-1,dt_hoje)) e os 3 WHENs compartilhados de
+                 "destino desatualizado" toleram 1 dia apenas para LOOKER_PNR
+                 (demais processos mantêm comparação com dt_hoje).
   Rollback     : scripts/rollback/2026/09/012_rollback_CU-86ak71ymk_monitor_pnr_bsc_view.sql
   Objetos      : ALTER VIEW dbo.vw_pbi_mon_alertas_processos_calc
   Dependências : dbo.tb_looker_pnr, dbo.tb_pnr_bsc, dbo.tb_clientes,
@@ -591,7 +595,7 @@ MetricasOrigem AS
 
         ON c.cli_cd_codigo_cliente = s.CodigoCliente
 
-    WHERE s.DataExtracao = r.dt_hoje
+    WHERE s.DataExtracao >= DATEADD(DAY, -1, r.dt_hoje)
 
     GROUP BY c.cli_id_logistics
 
@@ -1031,7 +1035,7 @@ MetricasDestino AS
 
         ON c.cli_cd_codigo_cliente = d.pnr_cd_cliente
 
-    WHERE CAST(d.pnr_dh_criacao AS DATE) = r.dt_hoje
+    WHERE CAST(d.pnr_dh_criacao AS DATE) >= DATEADD(DAY, -1, r.dt_hoje)
 
     GROUP BY c.cli_id_logistics
 
@@ -1577,7 +1581,7 @@ Avaliacao AS
 
                  AND b.qt_registros_destino > 0
 
-                 AND CAST(b.dh_ultimo_evento_destino AS DATE) < b.dt_hoje THEN 1
+                 AND CAST(b.dh_ultimo_evento_destino AS DATE) < DATEADD(DAY, -CASE WHEN b.processo_codigo = N'LOOKER_PNR' THEN 1 ELSE 0 END, b.dt_hoje) THEN 1
 
             WHEN b.tipo_regra = N'LOOKER_DIARIO'
 
@@ -1747,7 +1751,7 @@ Avaliacao AS
 
                  AND b.qt_registros_destino > 0
 
-                 AND CAST(b.dh_ultimo_evento_destino AS DATE) < b.dt_hoje THEN N'DESTINO_DATA_ANTIGA'
+                 AND CAST(b.dh_ultimo_evento_destino AS DATE) < DATEADD(DAY, -CASE WHEN b.processo_codigo = N'LOOKER_PNR' THEN 1 ELSE 0 END, b.dt_hoje) THEN N'DESTINO_DATA_ANTIGA'
 
             WHEN b.tipo_regra = N'LOOKER_DIARIO'
 
@@ -1893,7 +1897,7 @@ Avaliacao AS
 
                  AND (b.qt_registros_destino = 0
 
-                   OR CAST(b.dh_ultimo_evento_destino AS DATE) < b.dt_hoje) THEN N'DESTINO'
+                   OR CAST(b.dh_ultimo_evento_destino AS DATE) < DATEADD(DAY, -CASE WHEN b.processo_codigo = N'LOOKER_PNR' THEN 1 ELSE 0 END, b.dt_hoje)) THEN N'DESTINO'
 
             WHEN b.tipo_regra = N'LOOKER_DIARIO'
 
