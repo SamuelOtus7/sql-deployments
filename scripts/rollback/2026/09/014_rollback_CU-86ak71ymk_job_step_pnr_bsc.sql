@@ -36,6 +36,23 @@ BEGIN TRY
         EXEC msdb.dbo.sp_delete_jobstep
               @job_name = N'DriveAnalytics - Atualizações Looker'
             , @step_id  = @step_id;
+
+        -- Restaura o step que virou o ultimo como terminal do job (o forward
+        -- 014 mudou o ultimo step anterior para on_success_action = 3).
+        DECLARE @novo_ultimo INT;
+
+        SELECT @novo_ultimo = MAX(s.step_id)
+        FROM msdb.dbo.sysjobs j
+        JOIN msdb.dbo.sysjobsteps s ON s.job_id = j.job_id
+        WHERE j.name = N'DriveAnalytics - Atualizações Looker';
+
+        IF @novo_ultimo IS NOT NULL
+        BEGIN
+            EXEC msdb.dbo.sp_update_jobstep
+                  @job_name          = N'DriveAnalytics - Atualizações Looker'
+                , @step_id           = @novo_ultimo
+                , @on_success_action = 1;  -- volta a terminar o job com sucesso
+        END
     END
 
     --==========================================================================

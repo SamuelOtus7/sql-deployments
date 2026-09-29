@@ -41,6 +41,30 @@ BEGIN TRY
           AND s.step_name = N'USPTrataStagingPNRBSC'
     )
     BEGIN
+        -- O ultimo step atual termina o job com sucesso; se nao for ajustado,
+        -- o novo step nunca seria alcancado. Muda para "ir ao proximo step".
+        DECLARE @ultimo_step_id INT;
+
+        SELECT @ultimo_step_id = s.step_id
+        FROM msdb.dbo.sysjobs j
+        JOIN msdb.dbo.sysjobsteps s ON s.job_id = j.job_id
+        WHERE j.name = N'DriveAnalytics - Atualizações Looker'
+          AND s.step_name <> N'USPTrataStagingPNRBSC'
+          AND s.step_id = (
+              SELECT MAX(s2.step_id)
+              FROM msdb.dbo.sysjobsteps s2
+              WHERE s2.job_id = j.job_id
+                AND s2.step_name <> N'USPTrataStagingPNRBSC'
+          );
+
+        IF @ultimo_step_id IS NOT NULL
+        BEGIN
+            EXEC msdb.dbo.sp_update_jobstep
+                  @job_name          = N'DriveAnalytics - Atualizações Looker'
+                , @step_id           = @ultimo_step_id
+                , @on_success_action = 3;  -- vai para o proximo step
+        END
+
         EXEC msdb.dbo.sp_add_jobstep
               @job_name            = N'DriveAnalytics - Atualizações Looker'
             , @step_name           = N'USPTrataStagingPNRBSC'
