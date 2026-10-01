@@ -18,7 +18,7 @@
                  - Motorista         -> NomeMotorista
                  - placa             -> Placa
                  - tb_spe_status     -> StatusRota (label por IdStatus)
-                 - DistanciaTotal    -> KmSilosTotal (km oficial da rota SPE)
+                 - DistanciaTotal    -> KmSPETotal (km oficial da rota SPE)
                  - tb_spe_processamento_km_rotas -> KmAppIrisys /
                                         KmLatLongPacotes (mesmo schema da tabela
                                         tb_ml_processamento_km_rotas)
@@ -27,10 +27,13 @@
                                         TRY_CONVERT(bigint, CodigoRota))
                  - tb_fin_spe_prefatura -> prefatura_unica: KMRodado por Rota
                                         distinta (ROW_NUMBER por ano/mes/quinzena
-                                        mais recente). Como a prefatura SPE tem
-                                        KM unico (sem faixa inicio/fim),
-                                        PrefInicioIntervalo = PrefFimIntervalo =
-                                        KMRodado.
+                                        mais recente) -> KmPrefatura (km real
+                                        auditado). A prefatura SPE nao tem faixa
+                                        inicio/fim: PrefInicioIntervalo,
+                                        PrefFimIntervalo e PrefIntervaloFaixa
+                                        ficam 0/NULL e as colunas de comparacao
+                                        a prefatura (OrdemPrefatura,
+                                        DeltaFaixa_*) ficam NULL.
                  - tb_clientes       -> join por cli_id_shopee (nao
                                         cli_id_logistics); exclui cli_id_shopee=0
                                         para evitar fan-out com tenants nao-SPE
@@ -165,7 +168,7 @@ base AS (
             WHEN r.TipoOperacao = 'LM'
             THEN ISNULL(TRY_CONVERT(decimal(18, 4), r.DistanciaTotal), 0)
             ELSE 0
-        END AS KmSilosTotal,
+        END AS KmSPETotal,
 
         CAST(0 AS decimal(18, 4)) AS KmSilosLogistics,
 
@@ -199,15 +202,12 @@ base AS (
 
         CAST(NULL AS varchar(255)) AS LinkTrevo,
 
-        /* Prefatura — km unico por rota (tb_fin_spe_prefatura) */
-        ISNULL(pre.KmPrefatura, 0) AS PrefInicioIntervalo,
-        ISNULL(pre.KmPrefatura, 0) AS PrefFimIntervalo,
-
-        CASE
-            WHEN pre.KmPrefatura IS NOT NULL
-            THEN CAST(pre.KmPrefatura AS varchar(20))
-            ELSE ''
-        END AS PrefIntervaloFaixa,
+        /* Prefatura — SPE nao possui faixa de km (inicio/fim): colunas zeradas.
+           O km real auditado vai em KmPrefatura (tb_fin_spe_prefatura.KMRodado). */
+        CAST(0 AS decimal(18, 4)) AS PrefInicioIntervalo,
+        CAST(0 AS decimal(18, 4)) AS PrefFimIntervalo,
+        CAST(NULL AS varchar(20)) AS PrefIntervaloFaixa,
+        ISNULL(pre.KmPrefatura, 0) AS KmPrefatura,
 
         /* Parâmetros de KM do cliente */
         p1.ParamKmLabel AS ParamKm1Label,
@@ -406,13 +406,13 @@ FROM (
     frete_faixa_KmLatLongPacotes.OrdemFaixa
         AS OrdemLatLongPacotes,
 
-    CAST(frete_faixa_KmSilosTotal.bft_vl_inicio_faixa AS VARCHAR(5))
+    CAST(frete_faixa_KmSPETotal.bft_vl_inicio_faixa AS VARCHAR(5))
         + '/'
-        + CAST(frete_faixa_KmSilosTotal.bft_vl_fim_faixa AS VARCHAR(5))
-        AS FaixaKmSilosTotal,
+        + CAST(frete_faixa_KmSPETotal.bft_vl_fim_faixa AS VARCHAR(5))
+        AS FaixaKmSPETotal,
 
-    frete_faixa_KmSilosTotal.OrdemFaixa
-        AS OrdemSilosTotal,
+    frete_faixa_KmSPETotal.OrdemFaixa
+        AS OrdemSPETotal,
 
     CAST(frete_faixa_KmSilosLogistics.bft_vl_inicio_faixa AS VARCHAR(5))
         + '/'
@@ -465,91 +465,19 @@ FROM (
     frete_faixa_KmTrevo.OrdemFaixa
         AS OrdemFaixaTrevo,
 
-    CASE
-        WHEN a.PrefIntervaloFaixa = '' THEN 1
-        ELSE frete_faixa_KmPrefatura.OrdemFaixa
-    END AS OrdemPrefatura,
-
-    CASE
-        WHEN a.PrefIntervaloFaixa = '' THEN 1
-        ELSE frete_faixa_KmPrefatura.OrdemFaixa
-    END
-        - CASE
-            WHEN a.PrefIntervaloFaixa = '' THEN 1
-            ELSE frete_faixa_KmPrefatura.OrdemFaixa
-        END
-        AS DeltaFaixa_Prefatura,
-
-    frete_faixa_KmLatLongPacotes.OrdemFaixa
-        - CASE
-            WHEN a.PrefIntervaloFaixa = '' THEN 1
-            ELSE frete_faixa_KmPrefatura.OrdemFaixa
-        END
-        AS DeltaFaixa_LatLongPacotes,
-
-    frete_faixa_KmSilosTotal.OrdemFaixa
-        - CASE
-            WHEN a.PrefIntervaloFaixa = '' THEN 1
-            ELSE frete_faixa_KmPrefatura.OrdemFaixa
-        END
-        AS DeltaFaixa_SilosTotal,
-
-    frete_faixa_KmSilosLogistics.OrdemFaixa
-        - CASE
-            WHEN a.PrefIntervaloFaixa = '' THEN 1
-            ELSE frete_faixa_KmPrefatura.OrdemFaixa
-        END
-        AS DeltaFaixa_SilosLogistics,
-
-    CASE
-        WHEN CASE
-                WHEN a.PrefIntervaloFaixa = '' THEN 1
-                ELSE frete_faixa_KmAppIrisys.OrdemFaixa
-             END IS NULL
-         AND CASE
-                WHEN a.PrefIntervaloFaixa = '' THEN 1
-                ELSE frete_faixa_KmPrefatura.OrdemFaixa
-             END IS NULL
-        THEN 0
-        ELSE
-            CASE
-                WHEN a.PrefIntervaloFaixa = '' THEN 1
-                ELSE frete_faixa_KmAppIrisys.OrdemFaixa
-            END
-            - CASE
-                WHEN a.PrefIntervaloFaixa = '' THEN 1
-                ELSE frete_faixa_KmPrefatura.OrdemFaixa
-            END
-    END AS DeltaFaixa_AppIrisys,
-
-    frete_faixa_KmRtt.OrdemFaixa
-        - CASE
-            WHEN a.PrefIntervaloFaixa = '' THEN 1
-            ELSE frete_faixa_KmPrefatura.OrdemFaixa
-        END
-        AS DeltaFaixa_Rtt,
-
-    frete_faixa_KmValidacaoMapas.OrdemFaixa
-        - CASE
-            WHEN a.PrefIntervaloFaixa = '' THEN 1
-            ELSE frete_faixa_KmPrefatura.OrdemFaixa
-        END
-        AS DeltaFaixa_ValidacaoMapas,
-
-    frete_faixa_KmDraHistorico.OrdemFaixa
-        - CASE
-            WHEN a.PrefIntervaloFaixa = '' THEN 1
-            ELSE frete_faixa_KmPrefatura.OrdemFaixa
-        END
-        AS DeltaFaixa_DraHistorico,
-
-    /* TREVO */
-    frete_faixa_KmTrevo.OrdemFaixa
-        - CASE
-            WHEN a.PrefIntervaloFaixa = '' THEN 1
-            ELSE frete_faixa_KmPrefatura.OrdemFaixa
-        END
-        AS DeltaFaixa_Trevo
+    /* Comparacoes contra a faixa da prefatura: nao se aplicam a Shopee —
+       a prefatura SPE informa km unico (KMRodado), nao uma faixa de
+       frete. Colunas mantidas no schema como NULL. */
+    CAST(NULL AS int) AS OrdemPrefatura,
+    CAST(NULL AS int) AS DeltaFaixa_Prefatura,
+    CAST(NULL AS int) AS DeltaFaixa_LatLongPacotes,
+    CAST(NULL AS int) AS DeltaFaixa_SPETotal,
+    CAST(NULL AS int) AS DeltaFaixa_SilosLogistics,
+    CAST(NULL AS int) AS DeltaFaixa_AppIrisys,
+    CAST(NULL AS int) AS DeltaFaixa_Rtt,
+    CAST(NULL AS int) AS DeltaFaixa_ValidacaoMapas,
+    CAST(NULL AS int) AS DeltaFaixa_DraHistorico,
+    CAST(NULL AS int) AS DeltaFaixa_Trevo
 
     ,
     /* Delta KM Param1 vs RTT — faixas para PBI */
@@ -559,8 +487,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -575,8 +503,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -591,8 +519,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -606,8 +534,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -622,8 +550,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -637,8 +565,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -653,8 +581,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -668,8 +596,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -684,8 +612,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -703,8 +631,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -719,8 +647,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -735,8 +663,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -750,8 +678,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -766,8 +694,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -781,8 +709,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -797,8 +725,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -812,8 +740,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -828,8 +756,8 @@ FROM (
             WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(a.KmLatLongPacotes AS decimal(18,4))
             WHEN 'Km por trevo a trevo' THEN CAST(a.KmTrevo AS decimal(18,4))
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                 CAST(
                     CASE
@@ -858,9 +786,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -890,9 +818,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -922,9 +850,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -952,9 +880,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -984,9 +912,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1014,9 +942,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1046,9 +974,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1076,9 +1004,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1108,9 +1036,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1146,9 +1074,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1178,9 +1106,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1210,9 +1138,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1240,9 +1168,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1272,9 +1200,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1302,9 +1230,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1334,9 +1262,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1364,9 +1292,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1396,9 +1324,9 @@ FROM (
 
             WHEN 'Km do RTT' THEN CAST(a.KmRtt AS decimal(18,4))
 
-            WHEN 'Faixa km da prefatura' THEN CAST(a.PrefFimIntervalo AS decimal(18,4))
+            WHEN 'Faixa km da prefatura' THEN CAST(a.KmPrefatura AS decimal(18,4))
 
-            WHEN 'Km coletado do Silos' THEN CAST(a.KmSilosTotal AS decimal(18,4))
+            WHEN 'Km coletado do Silos' THEN CAST(a.KmSPETotal AS decimal(18,4))
 
             WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
 
@@ -1508,18 +1436,18 @@ LEFT JOIN frete_transportadora AS frete_faixa_KmSilosLogistics
    AND a.KmSilosLogistics <=
         TRY_CONVERT(decimal(18, 4), frete_faixa_KmSilosLogistics.bft_vl_fim_faixa)
 
-LEFT JOIN frete_transportadora AS frete_faixa_KmSilosTotal
+LEFT JOIN frete_transportadora AS frete_faixa_KmSPETotal
     ON vei.tvl_cd_tipo_veiculo =
-        frete_faixa_KmSilosTotal.bft_cd_tipo_veiculo
+        frete_faixa_KmSPETotal.bft_cd_tipo_veiculo
    AND a.TenantId =
-        frete_faixa_KmSilosTotal.bft_cd_transportadora
-   AND frete_faixa_KmSilosTotal.bft_cd_service_center =
+        frete_faixa_KmSPETotal.bft_cd_transportadora
+   AND frete_faixa_KmSPETotal.bft_cd_service_center =
         a.ServiceCenterOrigem
-   AND frete_faixa_KmSilosTotal.bft_estado IS NULL
-   AND a.KmSilosTotal >
-        (TRY_CONVERT(decimal(18, 4), frete_faixa_KmSilosTotal.bft_vl_inicio_faixa) - 1)
-   AND a.KmSilosTotal <=
-        TRY_CONVERT(decimal(18, 4), frete_faixa_KmSilosTotal.bft_vl_fim_faixa)
+   AND frete_faixa_KmSPETotal.bft_estado IS NULL
+   AND a.KmSPETotal >
+        (TRY_CONVERT(decimal(18, 4), frete_faixa_KmSPETotal.bft_vl_inicio_faixa) - 1)
+   AND a.KmSPETotal <=
+        TRY_CONVERT(decimal(18, 4), frete_faixa_KmSPETotal.bft_vl_fim_faixa)
 
 LEFT JOIN frete_transportadora AS frete_faixa_KmAppIrisys
     ON vei.tvl_cd_tipo_veiculo =
@@ -1555,9 +1483,9 @@ LEFT JOIN frete_transportadora AS frete_faixa_KmValidacaoMapas
    AND frete_faixa_KmValidacaoMapas.bft_cd_service_center =
         a.ServiceCenterOrigem
    AND frete_faixa_KmValidacaoMapas.bft_estado IS NULL
-   AND a.PrefInicioIntervalo >
+   AND a.KmValidacaoMapas >
         (TRY_CONVERT(decimal(18, 4), frete_faixa_KmValidacaoMapas.bft_vl_inicio_faixa) - 1)
-   AND a.PrefInicioIntervalo <=
+   AND a.KmValidacaoMapas <=
         TRY_CONVERT(decimal(18, 4), frete_faixa_KmValidacaoMapas.bft_vl_fim_faixa)
 
 LEFT JOIN frete_transportadora AS frete_faixa_KmDraHistorico
@@ -1587,19 +1515,6 @@ LEFT JOIN frete_transportadora AS frete_faixa_KmTrevo
    AND a.KmTrevo <=
         TRY_CONVERT(decimal(18, 4), frete_faixa_KmTrevo.bft_vl_fim_faixa)
 
-LEFT JOIN frete_transportadora AS frete_faixa_KmPrefatura
-    ON vei.tvl_cd_tipo_veiculo =
-        frete_faixa_KmPrefatura.bft_cd_tipo_veiculo
-   AND a.TenantId =
-        frete_faixa_KmPrefatura.bft_cd_transportadora
-   AND frete_faixa_KmPrefatura.bft_cd_service_center =
-        a.ServiceCenterOrigem
-   AND frete_faixa_KmPrefatura.bft_estado IS NULL
-   AND a.PrefInicioIntervalo >
-        (TRY_CONVERT(decimal(18, 4), frete_faixa_KmPrefatura.bft_vl_inicio_faixa) - 1)
-   AND a.PrefInicioIntervalo <=
-        TRY_CONVERT(decimal(18, 4), frete_faixa_KmPrefatura.bft_vl_fim_faixa)
-
 ) AS fin
 
 CROSS APPLY (
@@ -1615,8 +1530,8 @@ CROSS APPLY (
                     WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(fin.KmLatLongPacotes AS decimal(18,4))
                     WHEN 'Km por trevo a trevo' THEN CAST(fin.KmTrevo AS decimal(18,4))
                     WHEN 'Km do RTT' THEN CAST(fin.KmRtt AS decimal(18,4))
-                    WHEN 'Faixa km da prefatura' THEN CAST(fin.PrefFimIntervalo AS decimal(18,4))
-                    WHEN 'Km coletado do Silos' THEN CAST(fin.KmSilosTotal AS decimal(18,4))
+                    WHEN 'Faixa km da prefatura' THEN CAST(fin.KmPrefatura AS decimal(18,4))
+                    WHEN 'Km coletado do Silos' THEN CAST(fin.KmSPETotal AS decimal(18,4))
                     WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                         CAST(CASE WHEN ISNULL(fin.KmAppIrisys, 0) = 0 THEN fin.KmLatLongPacotes ELSE fin.KmAppIrisys END AS decimal(18,4))
                     WHEN 'Km de contingencia coletado de tb_dra_historico_rotas' THEN CAST(fin.KmDraHistorico AS decimal(18,4))
@@ -1629,8 +1544,8 @@ CROSS APPLY (
                 WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(fin.KmLatLongPacotes AS decimal(18,4))
                 WHEN 'Km por trevo a trevo' THEN CAST(fin.KmTrevo AS decimal(18,4))
                 WHEN 'Km do RTT' THEN CAST(fin.KmRtt AS decimal(18,4))
-                WHEN 'Faixa km da prefatura' THEN CAST(fin.PrefFimIntervalo AS decimal(18,4))
-                WHEN 'Km coletado do Silos' THEN CAST(fin.KmSilosTotal AS decimal(18,4))
+                WHEN 'Faixa km da prefatura' THEN CAST(fin.KmPrefatura AS decimal(18,4))
+                WHEN 'Km coletado do Silos' THEN CAST(fin.KmSPETotal AS decimal(18,4))
                 WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                     CAST(CASE WHEN ISNULL(fin.KmAppIrisys, 0) = 0 THEN fin.KmLatLongPacotes ELSE fin.KmAppIrisys END AS decimal(18,4))
                 WHEN 'Km de contingencia coletado de tb_dra_historico_rotas' THEN CAST(fin.KmDraHistorico AS decimal(18,4))
@@ -1642,8 +1557,8 @@ CROSS APPLY (
                 WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(fin.KmLatLongPacotes AS decimal(18,4))
                 WHEN 'Km por trevo a trevo' THEN CAST(fin.KmTrevo AS decimal(18,4))
                 WHEN 'Km do RTT' THEN CAST(fin.KmRtt AS decimal(18,4))
-                WHEN 'Faixa km da prefatura' THEN CAST(fin.PrefFimIntervalo AS decimal(18,4))
-                WHEN 'Km coletado do Silos' THEN CAST(fin.KmSilosTotal AS decimal(18,4))
+                WHEN 'Faixa km da prefatura' THEN CAST(fin.KmPrefatura AS decimal(18,4))
+                WHEN 'Km coletado do Silos' THEN CAST(fin.KmSPETotal AS decimal(18,4))
                 WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                     CAST(CASE WHEN ISNULL(fin.KmAppIrisys, 0) = 0 THEN fin.KmLatLongPacotes ELSE fin.KmAppIrisys END AS decimal(18,4))
                 WHEN 'Km de contingencia coletado de tb_dra_historico_rotas' THEN CAST(fin.KmDraHistorico AS decimal(18,4))
@@ -1655,8 +1570,8 @@ CROSS APPLY (
                 WHEN 'KM latitude e longetude dos Pacotes' THEN CAST(fin.KmLatLongPacotes AS decimal(18,4))
                 WHEN 'Km por trevo a trevo' THEN CAST(fin.KmTrevo AS decimal(18,4))
                 WHEN 'Km do RTT' THEN CAST(fin.KmRtt AS decimal(18,4))
-                WHEN 'Faixa km da prefatura' THEN CAST(fin.PrefFimIntervalo AS decimal(18,4))
-                WHEN 'Km coletado do Silos' THEN CAST(fin.KmSilosTotal AS decimal(18,4))
+                WHEN 'Faixa km da prefatura' THEN CAST(fin.KmPrefatura AS decimal(18,4))
+                WHEN 'Km coletado do Silos' THEN CAST(fin.KmSPETotal AS decimal(18,4))
                 WHEN 'Km do app Irisys ou KM lat e long dos pacotes.' THEN
                     CAST(CASE WHEN ISNULL(fin.KmAppIrisys, 0) = 0 THEN fin.KmLatLongPacotes ELSE fin.KmAppIrisys END AS decimal(18,4))
                 WHEN 'Km de contingencia coletado de tb_dra_historico_rotas' THEN CAST(fin.KmDraHistorico AS decimal(18,4))
