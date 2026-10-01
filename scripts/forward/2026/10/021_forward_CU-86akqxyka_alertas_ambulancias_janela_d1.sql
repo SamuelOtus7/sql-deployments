@@ -2250,7 +2250,7 @@ BEGIN TRY
         SELECT 1 FROM sys.sql_modules sm
         WHERE sm.object_id = OBJECT_ID('dbo.vw_pbi_mon_alertas_processos_calc')
           AND sm.definition LIKE '%d.amb_data >= DATEADD(DAY, -1, r.dt_hoje)%'
-          AND sm.definition LIKE "%N'LOOKER_PNR', N'LOOKER_AMBULANCIAS'%"
+          AND sm.definition LIKE '%N''LOOKER_PNR'', N''LOOKER_AMBULANCIAS''%'
     )
         THROW 50023, 'View nao foi alterada para a janela D-1 de ambulancias.', 1;
 

@@ -2234,7 +2234,7 @@ BEGIN TRY
         SELECT 1 FROM sys.sql_modules sm
         WHERE sm.object_id = OBJECT_ID('dbo.vw_pbi_mon_alertas_processos_calc')
           AND sm.definition LIKE '%WHERE d.amb_data = r.dt_hoje%'
-          AND sm.definition NOT LIKE "%N'LOOKER_PNR', N'LOOKER_AMBULANCIAS'%"
+          AND sm.definition NOT LIKE '%N''LOOKER_PNR'', N''LOOKER_AMBULANCIAS''%'
     )
         THROW 50024, 'View nao foi restaurada para a regra de hoje.', 1;
 
