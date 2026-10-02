@@ -113,19 +113,34 @@ GO
 -- 3. POS-CHECKS
 --==========================================================================
 BEGIN TRY
-    DECLARE @habilitados INT;
+    DECLARE @elegiveis INT, @habilitados INT;
 
-    SELECT @habilitados = COUNT(DISTINCT prm_cod_cliente)
-    FROM dbo.tb_parametros
-    WHERE prm_nm_parametro = N'Habilitar PNR BSC'
-      AND prm_ds_valor = N'1'
-      AND prm_in_ativo = 1
-      AND ISNULL(prm_in_excluido, 0) = 0;
+    SELECT @elegiveis = COUNT(DISTINCT s.CodigoCliente)
+    FROM dbo.tb_looker_pnr AS s WITH (NOLOCK)
+    INNER JOIN dbo.tb_clientes AS c WITH (NOLOCK)
+        ON c.cli_cd_codigo_cliente = s.CodigoCliente
+    WHERE s.DataExtracao >= DATEADD(DAY, -30, GETDATE())
+      AND c.cli_id_logistics IS NOT NULL;
 
-    IF @habilitados < 8
-        THROW 50053, 'Menos de 8 clientes habilitados para PNR BSC.', 1;
+    SELECT @habilitados = COUNT(DISTINCT s.CodigoCliente)
+    FROM dbo.tb_looker_pnr AS s WITH (NOLOCK)
+    INNER JOIN dbo.tb_clientes AS c WITH (NOLOCK)
+        ON c.cli_cd_codigo_cliente = s.CodigoCliente
+    INNER JOIN dbo.tb_parametros AS p WITH (NOLOCK)
+        ON p.prm_cod_cliente = s.CodigoCliente
+       AND p.prm_nm_parametro = N'Habilitar PNR BSC'
+       AND p.prm_ds_categoria = N'Financeiro - Pagamentos'
+       AND p.prm_ds_valor = N'1'
+       AND p.prm_in_ativo = 1
+       AND ISNULL(p.prm_in_excluido, 0) = 0
+    WHERE s.DataExtracao >= DATEADD(DAY, -30, GETDATE())
+      AND c.cli_id_logistics IS NOT NULL;
 
-    PRINT 'SUCESSO: Script executado com sucesso. Clientes habilitados: ' + CAST(@habilitados AS varchar(10));
+    IF @habilitados < @elegiveis
+        THROW 50053, 'Clientes elegiveis sem parametro habilitado.', 1;
+
+    PRINT 'SUCESSO: Script executado com sucesso. Elegiveis habilitados: '
+        + CAST(@habilitados AS varchar(10)) + '/' + CAST(@elegiveis AS varchar(10));
 END TRY
 BEGIN CATCH
     PRINT 'ERRO: ' + ERROR_MESSAGE();
