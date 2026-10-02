@@ -1,14 +1,22 @@
 /*==============================================================================
+  Task ClickUp : CU-PENDENTE (id da task a definir pelo solicitante)
+  Autor        : Samuel Nogueira (Devin)
+  Tipo         : Script de validacao A/B (nao e forward/rollback de deploy)
+  Ambiente     : QAS (db_IrisysDev). NAO rodar bloco 4 (restore) em PROD.
+  ==============================================================================
   VALIDACAO A/B — UspGeraColetaCidadesDistanteDia (+ UspGeraAtualizaCidadesDistanteDiaPacote)
   ------------------------------------------------------------------------------
-  Ambiente : QAS (db_IrisysDev). NAO rodar bloco 4 (restore) em PROD.
   Uso      : executar TODOS os blocos na MESMA sessao do SSMS (tabelas #temp).
   Objetivo : provar que a versao refatorada produz resultado identico a atual.
   Fluxo    : prechecks -> snapshot ANTES -> EXEC v1 -> snapshot v1 -> restore
-             -> EXEC v2 -> snapshot v2 -> diffs (esperado: 0 divergencias)
+             -> EXEC v2 -> snapshot v2 -> diffs (esperado: 0 divergencias em
+             rotas sem empate de SequenciaParada — ver bloco 6.0)
 ==============================================================================*/
 
-DECLARE @di       DATE = CAST(GETDATE() - 5 AS DATE);
+SET NOCOUNT ON;
+SET QUOTED_IDENTIFIER ON;
+
+DECLARE @di       DATE = CAST(GETDATE() - 1 AS DATE);  -- novo default: ontem..hoje
 DECLARE @df       DATE = CAST(GETDATE()     AS DATE);
 DECLARE @IdTransp INT  = NULL;   -- mesma assinatura da proc (NULL = todas)
 
@@ -16,7 +24,10 @@ DECLARE @IdTransp INT  = NULL;   -- mesma assinatura da proc (NULL = todas)
   0. PRE-CHECKS — rodam em qualquer estado, antes de tudo
 ==============================================================================*/
 
--- 0.1 Unicidade do join dos UPDATEs (IdRota + IdPacote). ESPERADO: 0 linhas.
+-- 0.1 Duplicidade de (IdRota + IdPacote). ESPERADO: pode ser > 0 —
+--     pacotes espelhados entre transportadoras compartilham o par (a UK real e
+--     (IdPacote, IdRota, IdTransportadora)). A v2 faz o join pela UK tripla; na v1
+--     esses pares recebem ordens consecutivas arbitrarias entre os gemeos.
 SELECT IdRota, IdPacote, COUNT(*) AS qtd
 FROM tb_ml_pacotes
 WHERE DataReferencia BETWEEN @di AND @df
@@ -141,6 +152,7 @@ WHERE NOT EXISTS (
      SOMENTE QAS. Nunca executar este bloco em PROD.
 ==============================================================================*/
 
+BEGIN TRY
 UPDATE p
 SET    p.CidadeDistante = a.CidadeDistante,
        p.Cidade         = a.Cidade
@@ -153,7 +165,8 @@ UPDATE r
 SET    r.CidadeDistante = a.CidadeDistante
 FROM   tb_ml_rotas r
 INNER JOIN #rot_antes a
-       ON a.IdRota = r.IdRota AND a.DataReferencia = r.DataReferencia;
+       ON a.IdRota = r.IdRota AND a.DataReferencia = r.DataReferencia
+WHERE  r.DataReferencia BETWEEN @di AND @df;
 
 DELETE g
 FROM   tb_dra_cidades_geo g
@@ -164,6 +177,11 @@ WHERE  NOT EXISTS (
       AND a.dcg_cidade_distante = g.dcg_cidade_distante
 )
 AND g.dcg_dh_inclusao >= DATEADD(MINUTE, -60, GETDATE()); -- so o que esta execucao inseriu
+END TRY
+BEGIN CATCH
+    PRINT 'ERRO no restore: ' + ERROR_MESSAGE();
+    THROW;
+END CATCH
 
 /*==============================================================================
   5. EXECUCAO V2 — versao refatorada (apos aplicar o forward em QAS)
@@ -192,8 +210,56 @@ INTO #geo_v2
 FROM tb_dra_cidades_geo;
 
 /*==============================================================================
-  6. DIFFS V1 x V2 — ESPERADO: 0 linhas em todos os blocos abaixo
+  6. DIFFS V1 x V2
+
+  ATENCAO — NAO-DETERMINISMO INERENTE (constatado em QAS, 2026-10-02):
+  a v1 diverge de si mesma entre execucoes (~165k pacotes na janela
+  2026-08-13/14) em rotas que possuem SequenciaParada empatada — tipicamente
+  pacotes espelhados entre transportadoras (mesmo IdRota+IdPacote, UK tripla).
+  LAG/LEAD ORDER BY SequenciaParada escolhe vizinho arbitrario no empate,
+  o que pode inverter o flag Isolado e renumerar a rota inteira.
+
+  EXPECTATIVA CORRETA:
+  - diff = 0 em rotas SEM empate de SequenciaParada;
+  - divergencias restritas a rotas com empate sao ruido inerente, nao regressao.
+  - a v2 usa desempate deterministico (IdPacote, IdTransportadora): duas
+    execucoes da v2 devem produzir resultado IDENTICO (diff v2xv2 = 0).
 ==============================================================================*/
+
+-- 6.0 Rotas divergentes x rotas com empate (validacao do criterio acima):
+--     ESPERADO: rotas_sem_empate_divergentes = 0
+WITH dv AS (
+    SELECT DISTINCT COALESCE(v1.IdRota, v2.IdRota) AS IdRota
+    FROM (
+        SELECT IdRota, IdPacote,
+               SUM(CAST(ISNULL(CidadeDistante,-1) AS BIGINT)) s,
+               MIN(ISNULL(CidadeDistante,-1)) mn,
+               MAX(ISNULL(CidadeDistante,-1)) mx
+        FROM #pac_v1 GROUP BY IdRota, IdPacote
+    ) v1
+    FULL JOIN (
+        SELECT IdRota, IdPacote,
+               SUM(CAST(ISNULL(CidadeDistante,-1) AS BIGINT)) s,
+               MIN(ISNULL(CidadeDistante,-1)) mn,
+               MAX(ISNULL(CidadeDistante,-1)) mx
+        FROM #pac_v2 GROUP BY IdRota, IdPacote
+    ) v2 ON v2.IdRota = v1.IdRota AND v2.IdPacote = v1.IdPacote
+    WHERE ISNULL(v1.s,-2) <> ISNULL(v2.s,-2)
+       OR ISNULL(v1.mn,-2) <> ISNULL(v2.mn,-2)
+       OR ISNULL(v1.mx,-2) <> ISNULL(v2.mx,-2)
+)
+SELECT COUNT(*) AS rotas_divergentes,
+       SUM(CASE WHEN t.IdRota IS NULL THEN 1 ELSE 0 END) AS rotas_sem_empate_divergentes
+FROM dv
+LEFT JOIN (
+    SELECT DISTINCT IdRota FROM (
+        SELECT IdRota, SequenciaParada
+        FROM tb_ml_pacotes WITH (NOLOCK) -- NOLOCK aceitavel: check de empate e apenas diagnostico
+        WHERE DataReferencia BETWEEN @di AND @df AND Excluido = 0
+        GROUP BY IdRota, SequenciaParada
+        HAVING COUNT(*) > 1
+    ) x
+) t ON t.IdRota = dv.IdRota;
 
 -- 6.1 Pacotes: divergencias em CidadeDistante / Cidade
 SELECT 'pac_v1_sobrando' AS lado, * FROM (
