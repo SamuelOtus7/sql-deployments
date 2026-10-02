@@ -13,8 +13,9 @@
   ==============================================================================*/
 
 SET NOCOUNT ON;
-
-BEGIN TRY
+SET QUOTED_IDENTIFIER ON;  -- obrigatorio ON: tb_dra_cidades_geo tem indice filtrado/espacial
+SET ANSI_NULLS ON;
+GO
 
 CREATE OR ALTER PROCEDURE [dbo].[UspGeraColetaCidadesDistanteDia]
 (
@@ -260,13 +261,15 @@ AND (
 EXEC [dbo].[UspGeraAtualizaCidadesDistanteDiaPacote] @datainicio, @datafim, @IdTransportadora;
 
 END
+GO
 
+BEGIN TRY
+    IF OBJECT_ID(N'dbo.UspGeraColetaCidadesDistanteDia') IS NULL
+        THROW 51000, 'Falha: procedure nao encontrada apos rollback.', 1;
     PRINT 'SUCESSO: UspGeraColetaCidadesDistanteDia restaurada para a versao baseline.';
-
 END TRY
 BEGIN CATCH
     PRINT 'ERRO: ' + ERROR_MESSAGE();
-    PRINT 'Linha: ' + CAST(ERROR_LINE() AS VARCHAR);
-    PRINT 'Severidade: ' + CAST(ERROR_SEVERITY() AS VARCHAR);
     THROW;
 END CATCH
+GO

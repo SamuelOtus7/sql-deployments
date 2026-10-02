@@ -11,13 +11,21 @@
                  - elimina #base2 + DELETE + segundo UPDATE em tb_ml_pacotes
                    (flag Isolado + ranking unico por rota; rotas 100% isoladas
                    continuam ranqueando os pontos isolados)
-                 - UPDATEs em tb_ml_pacotes deixam de fazer join por lat/lng
-                   (par IdRota+IdPacote ja e unico pela uk_ml_pacote_chave_temp)
+                 - UPDATEs em tb_ml_pacotes deixam de fazer join por lat/lng;
+                   join usa a UK real (IdRota, IdPacote, IdTransportadora), o que
+                   remove tambem a ambiguidade de pacotes espelhados entre
+                   transportadoras com o mesmo IdPacote
                  - CAST removido de colunas decimal (bss_dc_latitude/longitude)
                  - TRY_CAST nas coordenadas varchar do pacote (evita abortar a
                    proc com coordenada suja; antes o CAST/Point lancava erro)
                  - unificacao dos dois UPDATEs finais de tb_ml_rotas em um so scan
                  - SET NOCOUNT ON + OPTION (RECOMPILE) nas operacoes pesadas
+                 - DEFAULT de janela passa de D-5..hoje para ontem..hoje
+                   (decisao do solicitante; rotina diaria nao reprocessa D-5)
+                 - LAG/LEAD e ROW_NUMBER com desempate deterministico
+                   (SequenciaParada/distancia empatados: IdPacote+IdTransportadora);
+                   a v1 escolhia vizinho arbitrario em empates, tornando o
+                   ranking nao-deterministico entre execucoes
   Rollback     : scripts/rollback/2026/10/030_rollback_CU-PENDENTE_usp_coleta_cidades_perf.sql
   Objetos      : ALTER PROCEDURE dbo.UspGeraColetaCidadesDistanteDia
   Dependências : dbo.UspGeraAtualizaCidadesDistanteDiaPacote (inalterada);
@@ -25,8 +33,9 @@
   ==============================================================================*/
 
 SET NOCOUNT ON;
-
-BEGIN TRY
+SET QUOTED_IDENTIFIER ON;  -- obrigatorio ON: tb_dra_cidades_geo tem indice filtrado/espacial
+SET ANSI_NULLS ON;
+GO
 
 CREATE OR ALTER PROCEDURE [dbo].[UspGeraColetaCidadesDistanteDia]
 (
@@ -39,7 +48,7 @@ BEGIN
 
     SET NOCOUNT ON;
 
-    IF @datainicio IS NULL BEGIN SET @datainicio = CAST(GETDATE() - 5 AS DATE) END
+    IF @datainicio IS NULL BEGIN SET @datainicio = CAST(GETDATE() - 1 AS DATE) END
     IF @datafim    IS NULL BEGIN SET @datafim    = CAST(GETDATE()     AS DATE) END
 
     -- ela identifica quais sao as cidades do pacote e registra qual e o mais distante
@@ -78,12 +87,13 @@ BEGIN
         SELECT
              p.IdRota
             ,p.IdPacote
+            ,p.IdTransportadora
             ,TRY_CAST(p.LatitudeEnderecoParada  AS DECIMAL(14,10)) AS Lat
             ,TRY_CAST(p.LongitudeEnderecoParada AS DECIMAL(14,10)) AS Lng
-            ,LAG (TRY_CAST(p.LatitudeEnderecoParada  AS DECIMAL(14,10))) OVER (PARTITION BY p.IdRota ORDER BY p.SequenciaParada) AS LatAnt
-            ,LAG (TRY_CAST(p.LongitudeEnderecoParada AS DECIMAL(14,10))) OVER (PARTITION BY p.IdRota ORDER BY p.SequenciaParada) AS LngAnt
-            ,LEAD(TRY_CAST(p.LatitudeEnderecoParada  AS DECIMAL(14,10))) OVER (PARTITION BY p.IdRota ORDER BY p.SequenciaParada) AS LatPos
-            ,LEAD(TRY_CAST(p.LongitudeEnderecoParada AS DECIMAL(14,10))) OVER (PARTITION BY p.IdRota ORDER BY p.SequenciaParada) AS LngPos
+            ,LAG (TRY_CAST(p.LatitudeEnderecoParada  AS DECIMAL(14,10))) OVER (PARTITION BY p.IdRota ORDER BY p.SequenciaParada, p.IdPacote, p.IdTransportadora) AS LatAnt
+            ,LAG (TRY_CAST(p.LongitudeEnderecoParada AS DECIMAL(14,10))) OVER (PARTITION BY p.IdRota ORDER BY p.SequenciaParada, p.IdPacote, p.IdTransportadora) AS LngAnt
+            ,LEAD(TRY_CAST(p.LatitudeEnderecoParada  AS DECIMAL(14,10))) OVER (PARTITION BY p.IdRota ORDER BY p.SequenciaParada, p.IdPacote, p.IdTransportadora) AS LatPos
+            ,LEAD(TRY_CAST(p.LongitudeEnderecoParada AS DECIMAL(14,10))) OVER (PARTITION BY p.IdRota ORDER BY p.SequenciaParada, p.IdPacote, p.IdTransportadora) AS LngPos
             ,c.bss_dc_latitude  AS BaseLat
             ,c.bss_dc_longitude AS BaseLng
         FROM tb_ml_pacotes AS p WITH (NOLOCK)  -- NOLOCK intencional: dirty read aceitavel em rotina diaria de ranking
@@ -104,14 +114,15 @@ BEGIN
     SELECT
          par.IdRota
         ,par.IdPacote
+        ,par.IdTransportadora
         ,par.Lat AS Latitude
         ,par.Lng AS Longitude
-        ,pto.STDistance(ptb) AS distancia
+        ,pto.v.STDistance(ptb.v) AS distancia
         ,CASE WHEN par.LatAnt IS NOT NULL AND par.LngAnt IS NOT NULL
-              THEN pto.STDistance(geography::Point(par.LatAnt, par.LngAnt, 4326))
+              THEN pto.v.STDistance(geography::Point(par.LatAnt, par.LngAnt, 4326))
          END AS DistanciaDaAnterior
         ,CASE WHEN par.LatPos IS NOT NULL AND par.LngPos IS NOT NULL
-              THEN pto.STDistance(geography::Point(par.LatPos, par.LngPos, 4326))
+              THEN pto.v.STDistance(geography::Point(par.LatPos, par.LngPos, 4326))
          END AS DistanciaDaPosterior
     INTO #base
     FROM paradas AS par
@@ -128,6 +139,7 @@ BEGIN
         SELECT
              b.IdRota
             ,b.IdPacote
+            ,b.IdTransportadora
             ,b.distancia
             ,CASE WHEN (b.DistanciaDaAnterior  > 999 OR b.DistanciaDaAnterior  IS NULL)
                   AND (b.DistanciaDaPosterior > 999 OR b.DistanciaDaPosterior IS NULL)
@@ -138,7 +150,8 @@ BEGIN
         SELECT
              r.IdRota
             ,r.IdPacote
-            ,ROW_NUMBER() OVER (PARTITION BY r.IdRota ORDER BY r.Isolado, r.distancia DESC) AS ordem
+            ,r.IdTransportadora
+            ,ROW_NUMBER() OVER (PARTITION BY r.IdRota ORDER BY r.Isolado, r.distancia DESC, r.IdPacote, r.IdTransportadora) AS ordem
             ,MIN(r.Isolado)  OVER (PARTITION BY r.IdRota) AS MinIsolado
             ,r.Isolado
         FROM ranked AS r
@@ -147,8 +160,9 @@ BEGIN
     SET p.CidadeDistante = m.ordem
     FROM tb_ml_pacotes AS p WITH (ROWLOCK, READPAST, UPDLOCK)
     INNER JOIN marc AS m
-        ON m.IdRota   = p.IdRota
-       AND m.IdPacote = p.IdPacote
+        ON m.IdRota           = p.IdRota
+       AND m.IdPacote         = p.IdPacote
+       AND m.IdTransportadora = p.IdTransportadora
     WHERE (m.Isolado = 0 OR m.MinIsolado = 1)
       AND p.Excluido = 0
       AND p.DataReferencia BETWEEN @datainicio AND @datafim
@@ -213,13 +227,15 @@ BEGIN
     EXEC [dbo].[UspGeraAtualizaCidadesDistanteDiaPacote] @datainicio, @datafim, @IdTransportadora;
 
 END
+GO
 
+BEGIN TRY
+    IF OBJECT_ID(N'dbo.UspGeraColetaCidadesDistanteDia') IS NULL
+        THROW 51000, 'Falha: procedure nao encontrada apos deploy.', 1;
     PRINT 'SUCESSO: UspGeraColetaCidadesDistanteDia atualizada.';
-
 END TRY
 BEGIN CATCH
     PRINT 'ERRO: ' + ERROR_MESSAGE();
-    PRINT 'Linha: ' + CAST(ERROR_LINE() AS VARCHAR);
-    PRINT 'Severidade: ' + CAST(ERROR_SEVERITY() AS VARCHAR);
     THROW;
 END CATCH
+GO
