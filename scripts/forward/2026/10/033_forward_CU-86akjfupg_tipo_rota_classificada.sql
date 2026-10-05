@@ -7,7 +7,7 @@
   Descricao    : Reclassifica a coluna TipoRotaClassificada da view vw_rotas
                  (que alimenta vw_saas_rotas) pela composicao dos pacotes da
                  rota, via tb_ml_pacotes.TipoPonto:
-                   - TipoRota S*/U*  -> 'Rota Volumosa' (mantido, precede tudo)
+                   - TipoRota com prefixo 'S' ou 'U'  -> 'Rota Volumosa' (mantido, precede tudo)
                    - somente coletas (pickup)           -> 'Coleta'
                    - coletas + entregas                 -> 'Rota Híbrida'
                    - somente entregas / sem pacotes     -> 'Rota Convencional'
@@ -375,7 +375,7 @@ CONVERT(varchar(8), DATEADD(SECOND,
     0), 108) AS StemOutReal
 ,CASE
     -- CU-86akjfupg: classificacao por composicao dos pacotes da rota.
-    -- 'Rota Volumosa' (TipoRota S*/U*) mantem precedencia sobre a composicao.
+    -- 'Rota Volumosa' (TipoRota com prefixo 'S' ou 'U') mantem precedencia sobre a composicao.
     WHEN UPPER(LEFT(LTRIM(RTRIM(TipoRota)), 1)) IN ('S', 'U') THEN 'Rota Volumosa'
     WHEN cp.TemColeta = 1 AND ISNULL(cp.TemEntrega, 0) = 0 THEN 'Coleta'
     WHEN TipoRota = 'Coleta' AND ISNULL(cp.TemEntrega, 0) = 0 THEN 'Coleta'
