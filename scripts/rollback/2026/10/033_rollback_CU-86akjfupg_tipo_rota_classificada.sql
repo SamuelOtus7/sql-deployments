@@ -1099,7 +1099,7 @@ GO
 BEGIN TRY
     IF OBJECT_ID(N'dbo.vw_rotas') IS NULL
         THROW 50003, 'Falha: view dbo.vw_rotas nao encontrada apos rollback.', 1;
-    IF CHARINDEX('Rota híbrida', OBJECT_DEFINITION(OBJECT_ID('dbo.vw_rotas'))) > 0
+    IF CHARINDEX('Rota Híbrida', OBJECT_DEFINITION(OBJECT_ID('dbo.vw_rotas'))) > 0
         THROW 50006, 'Rollback incompleto: classificacao por composicao ainda presente.', 1;
 
     PRINT 'SUCESSO: vw_rotas restaurada a definicao anterior.';

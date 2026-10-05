@@ -9,13 +9,13 @@
                  rota, via tb_ml_pacotes.TipoPonto:
                    - TipoRota S*/U*  -> 'Rota Volumosa' (mantido, precede tudo)
                    - somente coletas (pickup)           -> 'Coleta'
-                   - coletas + entregas                 -> 'Rota híbrida'
-                   - somente entregas / sem pacotes     -> 'Rota convencional'
+                   - coletas + entregas                 -> 'Rota Híbrida'
+                   - somente entregas / sem pacotes     -> 'Rota Convencional'
                  Fallback preservado: rota nomeada 'Coleta' sem entregas
                  detectadas continua 'Coleta'.
                  Mudancas de comportamento vs. versao vigente:
-                   - TipoRota NULL/vazio passa de '' para 'Rota convencional';
-                   - rota 'Coleta' com entregas vira 'Rota híbrida' (a linha
+                   - TipoRota NULL/vazio passa de '' para 'Rota Convencional';
+                   - rota 'Coleta' com entregas vira 'Rota Híbrida' (a linha
                      WHEN TipoRota='Coleta' existia apenas no banco — fora do
                      baseline do repo — e foi mantida como fallback).
                  Exemplo de referencia da task: rota 434538931.
@@ -379,8 +379,8 @@ CONVERT(varchar(8), DATEADD(SECOND,
     WHEN UPPER(LEFT(LTRIM(RTRIM(TipoRota)), 1)) IN ('S', 'U') THEN 'Rota Volumosa'
     WHEN cp.TemColeta = 1 AND ISNULL(cp.TemEntrega, 0) = 0 THEN 'Coleta'
     WHEN TipoRota = 'Coleta' AND ISNULL(cp.TemEntrega, 0) = 0 THEN 'Coleta'
-    WHEN cp.TemColeta = 1 AND cp.TemEntrega = 1 THEN 'Rota híbrida'
-    ELSE 'Rota convencional'
+    WHEN cp.TemColeta = 1 AND cp.TemEntrega = 1 THEN 'Rota Híbrida'
+    ELSE 'Rota Convencional'
 END AS TipoRotaClassificada
 
 ,CONVERT(varchar(10), DataHoraSaidaEstacao, 103) + ' ' +
@@ -634,7 +634,7 @@ left join (
 left join [tb_ml_processamento_km_rotas] as kms
 on r.idrota = kms.idrota
 
--- CU-86akjfupg: composicao coleta/entrega da rota (pacotes com TipoPonto='pickup' = coleta)
+-- CU-86akjfupg: composicao coleta/entrega da rota (TipoPonto='pickup' = coleta)
 OUTER APPLY (
     SELECT
         MAX(CASE WHEN p.TipoPonto = 'pickup' THEN 1 ELSE 0 END)              AS TemColeta,
@@ -1133,7 +1133,7 @@ BEGIN TRY
         THROW 50003, 'Falha: view dbo.vw_rotas nao encontrada apos deploy.', 1;
     IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.vw_rotas') AND name = 'TipoRotaClassificada')
         THROW 50004, 'Coluna TipoRotaClassificada nao existe em dbo.vw_rotas.', 1;
-    IF CHARINDEX('Rota híbrida', OBJECT_DEFINITION(OBJECT_ID('dbo.vw_rotas'))) = 0
+    IF CHARINDEX('Rota Híbrida', OBJECT_DEFINITION(OBJECT_ID('dbo.vw_rotas'))) = 0
         THROW 50005, 'Nova classificacao nao aplicada em dbo.vw_rotas.', 1;
 
     PRINT 'SUCESSO: vw_rotas atualizada — TipoRotaClassificada por composicao.';
