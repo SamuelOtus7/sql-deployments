@@ -1,23 +1,17 @@
 /*==============================================================================
-  FORWARD MIGRATION SCRIPT
+  ROLLBACK MIGRATION SCRIPT
   ==============================================================================
-  Task ClickUp : CU-PENDENTE (id da task a definir pelo solicitante)
+  Task ClickUp : CU-86akrt363
   Autor        : Samuel Nogueira (Devin)
   Data         : 2026-10-05
-  Descrição    : Inclui nova branch no UNION do INSERT em
-                 tb_rotas_para_reprocessar na dbo.UspMLReprocessarRotas:
-                 reprocessa rotas que permaneceram com
-                 tb_ml_rotas.statusrota = 'planned' mas tiveram registro na
-                 tb_dra_historico_rotas (mesma rota, transportadora e data),
-                 desde que a mesma rota/transportadora NAO possua linha em
-                 tb_ml_rotas com status 'active' ou 'close'.
-                 Demais regras do UNION permanecem inalteradas.
-  Rollback     : scripts/rollback/2026/10/031_rollback_CU-PENDENTE_reprocessar_rotas_planned.sql
+  Descrição    : Reverte o forward 031 — restaura dbo.UspMLReprocessarRotas para
+                 a definicao anterior (sem a branch de rotas 'planned' com
+                 registro na tb_dra_historico_rotas).
+  Forward ref  : scripts/forward/2026/10/031_forward_CU-86akrt363_reprocessar_rotas_planned.sql
   Objetos      : CREATE OR ALTER PROCEDURE dbo.UspMLReprocessarRotas
-  Dependências : tb_rotas_para_reprocessar, dbo.UspMLInsereRotasReprocessadas,
-                 dbo.UspMLAtualizaDeltaIndicadoresRotas, tb_ml_rotas,
-                 tb_ml_pacotes, tb_dra_historico_rotas, tb_clientes, vw_rotas,
-                 db_Irisys_Json.dbo.tb_ml_coleta_rotas
+  ==============================================================================
+  ATENÇÃO: Este script restaura a versao vigente antes do forward
+           (modify_date 2026-03-10 em PROD / baseline do repo).
   ==============================================================================*/
 
 SET NOCOUNT ON;
@@ -306,30 +300,6 @@ union
    and a.excluido = 0
    and a.pacotesentregues <> c.dhr_nr_envios_entregues
 
-   union
-
-   --reprocessa rotas que permaneceram 'planned' mas tiveram registro no historico DRA;
-   --nao pode existir a mesma rota/transportadora com status 'active' ou 'close' em tb_ml_rotas
-   select distinct
-          a.idrota,
-    a.datareferencia,
-      a.IdTransportadora
-   from tb_ml_rotas a with(nolock)
-   join tb_dra_historico_rotas d with(nolock)
-   on a.idrota = d.dhr_nr_rota
-   and a.idtransportadora = d.dhr_cd_cliente
-   and a.datareferencia = d.dhr_dt_data
-   where a.statusrota = 'planned'
-   and a.excluido = 0
-   and a.datareferencia >= DATEADD(DAY, -10, CAST(GETDATE() AS DATE))
-   and not exists (
-          select 1
-          from tb_ml_rotas x with(nolock)
-          where x.idrota = a.idrota
-            and x.idtransportadora = a.idtransportadora
-            and x.statusrota in ('active','close')
-   )
-
   exec [UspMLInsereRotasReprocessadas]
   exec [UspMLAtualizaDeltaIndicadoresRotas]
 
@@ -355,8 +325,8 @@ GO
 
 BEGIN TRY
     IF OBJECT_ID(N'dbo.UspMLReprocessarRotas') IS NULL
-        THROW 51000, 'Falha: procedure nao encontrada apos deploy.', 1;
-    PRINT 'SUCESSO: UspMLReprocessarRotas atualizada.';
+        THROW 51000, 'Falha: procedure nao encontrada apos rollback.', 1;
+    PRINT 'SUCESSO: Rollback de UspMLReprocessarRotas executado.';
 END TRY
 BEGIN CATCH
     PRINT 'ERRO: ' + ERROR_MESSAGE();
