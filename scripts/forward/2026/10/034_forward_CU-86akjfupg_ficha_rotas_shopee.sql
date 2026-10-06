@@ -399,6 +399,8 @@ BEGIN
         ,CAST(NULL AS VARCHAR(50))                   AS PNR
         ,p.RecebidoPor
         ,p.URLImagem
+    -- NOLOCK: leitura de tela operacional (mesmo padrao das demais leituras de
+    -- tb_spe_*/tb_ml_* no projeto); dirty read aceitavel, sem custo de lock.
     FROM dbo.tb_spe_pacotes_v4 AS p WITH (NOLOCK)
     LEFT JOIN dbo.tb_spe_motoristas AS m WITH (NOLOCK)
         ON  m.IdMotorista      = p.IdMotorista
