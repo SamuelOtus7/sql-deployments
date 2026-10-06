@@ -135,7 +135,9 @@ BEGIN
     LEFT JOIN
     (
         SELECT
-              [vrt_cd_rota] AS idrota
+              -- CAST: vrt_cd_rota e INT; IdRota SPE e varchar ('AT...') —
+              -- sem o cast o join quebrava por conversao implicita
+              CAST([vrt_cd_rota] AS VARCHAR(50)) AS idrota
             , [vrt_cd_status_validacao]
             , [vrt_cd_usuario_validacao]
             , [vrt_dt_data_hora_validacao]
@@ -238,14 +240,14 @@ BEGIN
         -- [OTIMIZACAO] INNER JOIN #Pag limita PNR as rotas da pagina
         SELECT
               pacotes.IdTransportadora
-            , pacotes.IdRota
+            , CAST(pacotes.IdRota AS VARCHAR(50)) AS IdRota
             , COUNT(*) AS QtdPnr
         FROM dbo.vw_pacotes AS pacotes
         INNER JOIN dbo.tb_ml_pnr AS BasePnr
             ON pacotes.IdTransportadora = BasePnr.IdTransportadora
            AND pacotes.identrega = BasePnr.IdPacote
         INNER JOIN #Pag AS pg
-            ON pg.IdRota = pacotes.IdRota
+            ON pg.IdRota = CAST(pacotes.IdRota AS VARCHAR(50))
         WHERE pacotes.IdTransportadora = @Transportadoraid
           AND pacotes.DataReferencia BETWEEN @DataIni AND @DataFim
         GROUP BY
@@ -256,7 +258,8 @@ BEGIN
        AND a.cli_id_logistics = pnr.IdTransportadora
     LEFT JOIN dbo.vw_rotas AS rotas
         ON a.cli_id_logistics = rotas.IdTransportadora
-       AND a.IdRota = rotas.IdRota
+       -- CAST: IdRota em vw_rotas e int; IdRota SPE e varchar ('AT...')
+       AND a.IdRota = CAST(rotas.IdRota AS VARCHAR(50))
     ORDER BY a.IdRota;
 
     DROP TABLE #Pag;
