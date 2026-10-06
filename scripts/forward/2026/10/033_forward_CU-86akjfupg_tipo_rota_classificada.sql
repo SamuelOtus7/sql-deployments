@@ -11,6 +11,8 @@
                    - somente coletas (pickup)           -> 'Coleta'
                    - coletas + entregas                 -> 'Rota Híbrida'
                    - somente entregas / sem pacotes     -> 'Rota Convencional'
+                 Pacote pickup ja efetivado (StatusEntrega='picked_up') em
+                 outra rota nao conta como coleta desta rota.
                  Fallback preservado: rota nomeada 'Coleta' sem entregas
                  detectadas continua 'Coleta'.
                  Mudancas de comportamento vs. versao vigente:
@@ -637,12 +639,28 @@ on r.idrota = kms.idrota
 -- CU-86akjfupg: composicao coleta/entrega da rota (TipoPonto='pickup' = coleta)
 OUTER APPLY (
     SELECT
-        MAX(CASE WHEN p.TipoPonto = 'pickup' THEN 1 ELSE 0 END)              AS TemColeta,
-        MAX(CASE WHEN ISNULL(p.TipoPonto, '') <> 'pickup' THEN 1 ELSE 0 END) AS TemEntrega
-    FROM tb_ml_pacotes p WITH (NOLOCK)
-    WHERE p.IdRota = r.IdRota
-      AND p.IdTransportadora = r.IdTransportadora
-      AND p.Excluido = 0
+        MAX(v.TemColeta)  AS TemColeta,
+        MAX(v.TemEntrega) AS TemEntrega
+    FROM (
+        SELECT
+            -- pickup ja efetivado (picked_up) em outra rota nao conta como coleta desta
+            CASE WHEN p.TipoPonto = 'pickup'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM tb_ml_pacotes p2 WITH (NOLOCK)
+                          WHERE p2.IdPacote = p.IdPacote
+                            AND p2.IdTransportadora = p.IdTransportadora
+                            AND p2.IdRota <> p.IdRota
+                            AND p2.TipoPonto = 'pickup'
+                            AND p2.StatusEntrega = 'picked_up'
+                            AND p2.Excluido = 0
+                      ) THEN 1 ELSE 0 END AS TemColeta,
+            CASE WHEN ISNULL(p.TipoPonto, '') <> 'pickup' THEN 1 ELSE 0 END AS TemEntrega
+        FROM tb_ml_pacotes p WITH (NOLOCK)
+        WHERE p.IdRota = r.IdRota
+          AND p.IdTransportadora = r.IdTransportadora
+          AND p.Excluido = 0
+    ) v
 ) cp
 
 --Esta join abaixo é para a visão de alterar o monitoramento MELI de base p/ XPT
