@@ -293,6 +293,30 @@ union
    and a.excluido = 0  
    and a.pacotesentregues <> c.dhr_nr_envios_entregues  
     
+   union  
+  
+   --reprocessa rotas que permaneceram 'planned' mas tiveram registro no historico DRA;  
+   --nao pode existir a mesma rota/transportadora com status 'active' ou 'close' em tb_ml_rotas  
+   select distinct  
+          a.idrota,  
+    a.datareferencia,      
+      a.IdTransportadora  
+   from tb_ml_rotas a with(nolock)  
+   join tb_dra_historico_rotas d with(nolock)  
+   on a.idrota = d.dhr_nr_rota  
+   and a.idtransportadora = d.dhr_cd_cliente  
+   and a.datareferencia = d.dhr_dt_data  
+   where a.statusrota = 'planned'  
+   and a.excluido = 0  
+   and a.datareferencia >= DATEADD(DAY, -10, CAST(GETDATE() AS DATE))  
+   and not exists (  
+          select 1  
+          from tb_ml_rotas x with(nolock)  
+          where x.idrota = a.idrota  
+            and x.idtransportadora = a.idtransportadora  
+            and x.statusrota in ('active','close')  
+   )  
+    
   exec [UspMLInsereRotasReprocessadas]  
   exec [UspMLAtualizaDeltaIndicadoresRotas]  
   
