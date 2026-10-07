@@ -4,22 +4,24 @@
   Task ClickUp : CU-86akt9utu
   Autor        : Samuel Nogueira (Devin)
   Data         : 2026-10-07
-  Descricao    : Vincula o tipo de contrato Frota Fixa Campo Grande a unidade
-                 MS3 no SSW (dbo.UspFinIntegracaoSSW), conforme arquivo
-                 SSW_RODOPRIME.sql anexado a task:
-                 1) CASE pib_ds_base: adiciona WHEN 'SMS3' THEN 'MS3' e
-                    remapeia 'SMS1' de 'MS1' para 'MS3'. Hoje SMS3 caia com
-                    pib_ds_base NULL e a integracao falhava com "Campo
-                    Unidade nao informado ou vazio" (status_irisys 1086,
-                    status_terceiro 1349).
+  Descricao    : Vincula o tipo de contrato Frota Fixa Campo Grande
+                 (tb_tipo_contrato.ttc_cd_tipo_contrato = 498, cliente 61)
+                 a unidade MS3 no SSW (dbo.UspFinIntegracaoSSW):
+                 1) CASE pib_ds_base passa a discriminar por TIPO DE CONTRATO:
+                    espelhos com mtn_cd_tipo_contrato = 498 recebem 'MS3'
+                    independente da base. Adiciona WHEN 'SMS3' THEN 'MS3' por
+                    redundancia e MANTEM 'SMS1' -> 'MS1' — diverge do arquivo
+                    SSW_RODOPRIME.sql original (que remapeava SMS1 -> MS3):
+                    evidencia em PROD mostra que espelhos SMS1 sao a operacao
+                    regular de Campo Grande (mtn_cd_tipo_contrato NULL, 138
+                    espelhos integrados como MS1), enquanto SMS3 e exclusivo
+                    do contrato 498 (82 espelhos). Remapear SMS1 enviaria a
+                    operacao regular para a unidade errada.
                  2) Correcao de dados: devolve a fila de envio (status 1084,
                     erro/tentativas zerados) as linhas SMS3 gravadas com
                     base NULL. A proc nao reinsere espelhos ja integrados
                     (anti-join + UX_tb_pag_integracao_bancos_cd_espelho), por
                     isso o UPDATE corretivo e necessario.
-                 ATENCAO: o remap de SMS1 (MS1 -> MS3) vale para TODOS os
-                 novos espelhos SMS1 do cliente 61, nao apenas Frota Fixa —
-                 aplicado conforme arquivo aprovado na task.
                  OBS: o 'USE db_Irisys' do arquivo original foi removido para
                  permitir execucao em QAS (db_IrisysDev).
   Rollback     : scripts/rollback/2026/10/037_rollback_CU-86akt9utu_ssw_frota_fixa_ms3.sql
@@ -110,7 +112,12 @@ BEGIN
         NULL AS Processamento,
         0 AS Tentativas,
         NEWID() AS uid,
-        CASE pag.mtn_base_principal
+        CASE
+            -- CU-86akt9utu: Frota Fixa Campo Grande = tipo de contrato 498
+            -- (tb_tipo_contrato, cliente 61). Discriminado por contrato e nao
+            -- por base, pois SMS1 e a operacao regular de CG (sem contrato).
+            WHEN pag.mtn_cd_tipo_contrato = 498 THEN 'MS3'
+            ELSE CASE pag.mtn_base_principal
             WHEN 'EBA4'  THEN 'SAJ'
             WHEN 'EBA12' THEN 'ALG'
             WHEN 'EBA14' THEN 'SER'
@@ -140,11 +147,12 @@ BEGIN
             WHEN 'SBA4'  THEN 'BA2'
             WHEN 'EPA8'  THEN 'PA8'
             WHEN 'SMG8'  THEN 'MG8'
-            WHEN 'SMS1'  THEN 'MS3'
+            WHEN 'SMS1'  THEN 'MS1'
             WHEN 'SMS3'  THEN 'MS3'
             WHEN 'SDF2'  THEN 'DF2'
             WHEN 'SDF1'  THEN 'DF1'
 
+            END
         END AS base
     FROM dbo.tb_pag_espelhos AS pag
     INNER JOIN dbo.tb_pgto_periodo AS per
