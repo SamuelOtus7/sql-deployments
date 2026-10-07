@@ -1,0 +1,1475 @@
+/*==============================================================================
+  FORWARD MIGRATION SCRIPT
+  ==============================================================================
+  Task ClickUp : CU-86akpq9ny
+  Autor        : Devin
+  Data         : 2026-09-30
+  Descricao    : Classifica rota como 'Coleta' quando possui pacote com label
+                 'Coleta' (regra do Monitoramento para o tenant 27 - Flight
+                 Cargo, complementar a CU-86akjfupg):
+                 1) Backfill + UPDATE recorrente em UspMLAtualizaIndicadoresRota:
+                    rotas do tenant 27 com pacote 'coletado em rota'
+                    (StatusEntrega='not_delivered', SubStatus<>'transferred',
+                    ponto stop/stop_place_prepared/pickup) recebem
+                    tb_ml_rotas.TipoRota = 'Coleta'. A condicao e validada via
+                    tb_ml_status_entrega_traducao (chave 'coletado_em_rota',
+                    label 'Coleta'), mantendo a parametrizacao por cliente.
+                 2) vw_rotas.TipoRotaClassificada ganha ramo explicito
+                    TipoRota = 'Coleta' -> 'Coleta' (antes cairia em
+                    'Rota Convencional').
+                 Antes do backfill grava backup dos valores originais de
+                 TipoRota em dbo.tb_ml_rotas_TipoRota_bkp_CU86akpq9ny.
+  Rollback     : scripts/rollback/2026/09/018_rollback_CU-86akpq9ny_tipo_rota_coleta.sql
+  Objetos      : dbo.UspMLAtualizaIndicadoresRota, dbo.vw_rotas,
+                 dbo.tb_ml_rotas (UPDATE), dbo.tb_ml_rotas_TipoRota_bkp_CU86akpq9ny (CREATE)
+  Dependencias : dbo.tb_ml_pacotes, dbo.tb_clientes,
+                 dbo.tb_ml_status_entrega_traducao (seed CU-86akjfupg tenant 27)
+  Observacao   : vw_rotas.Ambulancia / AmbulanciaFiltro derivam de
+                 'TipoRota IS NULL' - rotas marcadas 'Coleta' passam a exibir
+                 'Nao'/0 nessas colunas (efeito colateral conhecido).
+  ==============================================================================*/
+
+SET NOCOUNT ON;
+
+BEGIN TRY
+    --==========================================================================
+    -- 1. PRE-CHECKS
+    --==========================================================================
+    IF NOT EXISTS (SELECT 1 FROM sys.procedures WHERE object_id = OBJECT_ID('dbo.UspMLAtualizaIndicadoresRota'))
+        THROW 50001, 'Procedure dbo.UspMLAtualizaIndicadoresRota nao encontrada.', 1;
+    IF NOT EXISTS (SELECT 1 FROM sys.views WHERE object_id = OBJECT_ID('dbo.vw_rotas'))
+        THROW 50002, 'View dbo.vw_rotas nao encontrada.', 1;
+    IF NOT EXISTS (
+        SELECT 1 FROM tb_ml_status_entrega_traducao
+        WHERE TenantID = 27 AND StatusEntrega = 'coletado_em_rota' AND StatusEntregaTraduzido = 'Coleta'
+    )
+        THROW 50003, 'Seed tenant 27 (coletado_em_rota -> Coleta) ausente em tb_ml_status_entrega_traducao. Aplicar CU-86akjfupg antes.', 1;
+END TRY
+BEGIN CATCH
+    PRINT 'ERRO (pre-check): ' + ERROR_MESSAGE();
+    THROW;
+END CATCH;
+GO
+
+BEGIN TRY
+    --==========================================================================
+    -- BACKFILL: marca TipoRota = 'Coleta' nas rotas do tenant 27 que possuem
+    -- pacote 'Coleta' (mesma condicao da vw_pacotes). Antes grava backup dos
+    -- valores originais em dbo.tb_ml_rotas_TipoRota_bkp_CU86akpq9ny (rollback).
+    --==========================================================================
+    IF OBJECT_ID('dbo.tb_ml_rotas_TipoRota_bkp_CU86akpq9ny','U') IS NULL
+    BEGIN
+        SELECT r.IdRota, r.IdTransportadora, r.DataReferencia, r.TipoRota
+        INTO dbo.tb_ml_rotas_TipoRota_bkp_CU86akpq9ny
+        FROM tb_ml_rotas r WITH(NOLOCK)
+        JOIN tb_clientes cli WITH(NOLOCK)
+            ON cli.cli_id_logistics = r.IdTransportadora
+            AND cli.cli_in_ativo = 1
+            AND cli.cli_cd_codigo_cliente = 27
+        WHERE r.Excluido = 0
+          AND r.DataReferencia >= DATEADD(MONTH, -6, GETDATE())
+          AND EXISTS (
+              SELECT 1 FROM tb_ml_pacotes p WITH(NOLOCK)
+              WHERE p.IdTransportadora = r.IdTransportadora
+                AND p.IdRota = r.IdRota
+                AND p.Excluido = 0
+                AND p.StatusEntrega = 'not_delivered'
+                AND ISNULL(p.SubStatus,'') <> 'transferred'
+                AND (p.Status IN ('stop','stop_place_prepared') OR ISNULL(p.TipoPonto,'') = 'pickup')
+          );
+
+        PRINT 'Backup criado: ' + CAST(@@ROWCOUNT AS varchar(10)) + ' rotas em tb_ml_rotas_TipoRota_bkp_CU86akpq9ny';
+    END
+    ELSE
+        PRINT 'Backup ja existia - preservado (reexecucao).';
+
+    UPDATE r
+    SET r.TipoRota = 'Coleta'
+    FROM tb_ml_rotas r
+    JOIN tb_clientes cli WITH(NOLOCK)
+        ON cli.cli_id_logistics = r.IdTransportadora
+        AND cli.cli_in_ativo = 1
+        AND cli.cli_cd_codigo_cliente = 27
+    WHERE r.Excluido = 0
+      AND ISNULL(r.TipoRota,'') <> 'Coleta'
+      AND r.DataReferencia >= DATEADD(MONTH, -6, GETDATE())
+      AND EXISTS (
+          SELECT 1 FROM tb_ml_pacotes p WITH(NOLOCK)
+          WHERE p.IdTransportadora = r.IdTransportadora
+            AND p.IdRota = r.IdRota
+            AND p.Excluido = 0
+            AND p.StatusEntrega = 'not_delivered'
+            AND ISNULL(p.SubStatus,'') <> 'transferred'
+            AND (p.Status IN ('stop','stop_place_prepared') OR ISNULL(p.TipoPonto,'') = 'pickup')
+      );
+
+    PRINT 'Backfill TipoRota=Coleta: ' + CAST(@@ROWCOUNT AS varchar(10)) + ' rotas atualizadas.';
+END TRY
+BEGIN CATCH
+    PRINT 'ERRO (backfill): ' + ERROR_MESSAGE();
+    THROW;
+END CATCH;
+GO
+
+	CREATE OR ALTER PROCEDURE [dbo].[UspMLAtualizaIndicadoresRota] (
+		@QtdeDiasRetroativo int = 1--5 alterado para 1 dia por conta de rodar de minuto em minuto -- Matheus 20/08/25
+		,@IdRota int = null
+		,@IdTransportadora int = null
+		,@DataInicial date = null
+		,@DataFinal date = null
+	)
+	as
+	begin
+
+		SET NOCOUNT ON;
+
+		-- se datas nao informadas, mantem o comportamento atual (retroativo)
+		declare @dtIni date = isnull(@DataInicial, dateadd(day,-@QtdeDiasRetroativo,cast(getdate() as date)))
+		declare @dtFim date = @DataFinal   -- null = sem teto (igual hoje)
+
+		select 
+			distinct 
+			p.IdRota,
+			p.IdRotaOrigem,
+			p.DataReferencia,
+			p.IdTransportadora
+			into #pacotes_ambulancia
+		from 
+			tb_ml_pacotes p with(nolock) 
+		where 
+			p.Excluido = 0
+			and (@IdTransportadora is null or p.IdTransportadora = @IdTransportadora)
+			and (
+					(@Idrota is null and p.DataReferencia >= @dtIni and (@dtFim is null or p.DataReferencia <= @dtFim))
+					or
+					(@IdRota is not null and p.IdRota = @Idrota)
+				)
+			and p.IdRotaOrigem is not null
+
+		select
+			r2.IdRota,
+			r2.IdTransportadora,
+			r2.DataReferencia,
+			r2.OrigemSaida
+
+			into #rotas_ambulancia
+
+		from
+			tb_ml_rotas r2 with(nolock)
+		where
+			r2.Excluido = 0 
+			and isnull(r2.OrigemSaida,'') <> ''
+			and (@IdTransportadora is null or r2.IdTransportadora = @IdTransportadora)
+			and (
+					(@Idrota is null and r2.DataReferencia >= @dtIni and (@dtFim is null or r2.DataReferencia <= @dtFim))
+					or
+					(@IdRota is not null and r2.IdRota = @Idrota)
+				)
+
+
+		update
+			r
+		set
+			r.QuantidadePontos = isnull(p.QuantidadePontos,0),
+			r.QuantidadeParadas = isnull(p.QuantidadeParadas,0),
+			r.DataUltimaAtualizacaoPacote = p.UltimaAtualizacao,
+			r.DataPrimeiraEntrega = p.PrimeiraEntrega,
+			r.DataUltimaEntrega = p.DataUltimaEntrega,
+			r.StatusPrimeiraEntrega = p2.StatusPrimeiraEntrega,
+			r.StatusSegundaEntrega = p2.StatusSegundaEntrega,
+			r.QuantidadeReclamacoes = isnull(p.QuantidadeReclamacoes,0),
+			--r.Ambulancia = case when (r.PacotesEntregues = r.QuantidadeAmbulancia or r.PacotesRecebidos = r.TotalPacotes) and TotalPacotes > 0 and PacotesEntregues > 0 then 1 else 0 end,
+			--r.Ambulancia = case when r.PacotesEntregues = r.PacotesRecebidos and TotalPacotes > 0 and PacotesEntregues > 0 then 1 else 0 end,
+			r.Ambulancia = case when QuantidadeAmbulancia > 0 then 1 else 0 end,
+			r.OrigemSaidaAmbulancia = ambulancia.OrigemSaida,
+			r.EnderecosVisitados = isnull(p.EnderecosVisitados,0)
+		from
+			tb_ml_rotas r
+			left join (
+				select
+					p.IdTransportadora,
+					p.IdRota,
+					p.DataReferencia,
+					max(pontos.QuantidadePontosParada) QuantidadePontos,
+					count(distinct p.IdParada) QuantidadeParadas,
+					sum(p.QuantidadeReclamacoes) QuantidadeReclamacoes,
+					max(p.DataAtualizacao) UltimaAtualizacao,
+					min(case when p.StatusEntrega = 'delivered' then p.DataHoraEntrega end) PrimeiraEntrega,
+					max(case when p.StatusEntrega = 'delivered' then p.DataHoraEntrega end) DataUltimaEntrega,
+					sum(case when st.se_ds_classificacao in ('Visitado') then 1 else 0 end) EnderecosVisitados
+				from
+					tb_ml_pacotes p with(nolock)
+					left join tb_ml_traducoes t3 on p.SubStatus = t3.tds_vl_json and t3.tds_nm_tabela = 'tb_ml_pacotes' and t3.tds_nm_campo = 'SubStatus'
+					left join tb_clientes cli with(nolock) on p.IdTransportadora = cli.cli_id_logistics
+					left join tb_ml_status_entrega as st on t3.tds_ds_traducao = st.se_ds_status_entrega and st.TenantID = cli.cli_cd_codigo_cliente
+					
+					left join (
+						select
+							IdTransportadora,
+							IdRota,
+							DataReferencia,
+							sum(QuantidadePontosParada) QuantidadePontosParada
+						from
+							(
+								select
+									IdTransportadora,
+									IdRota,
+									DataReferencia,
+									IdParada,
+									max(QuantidadePontosParada) QuantidadePontosParada
+								from
+									tb_ml_pacotes p with(nolock)
+								where
+									Excluido = 0
+									and (isnull(p.SubStatus,'') not in('transferred')
+										 or isnull(p.SubStatus,'') not in('missing') and p.statusparada = 'incomplete')
+									and (@IdTransportadora is null or p.IdTransportadora = @IdTransportadora)
+									and (
+										(@Idrota is null and p.DataReferencia >= @dtIni and (@dtFim is null or p.DataReferencia <= @dtFim))
+										or
+										(@IdRota is not null and p.IdRota = @Idrota)
+									)
+								group by
+									IdTransportadora,
+									IdRota,
+									DataReferencia,
+									IdParada
+							) p
+					
+
+						group by
+							IdTransportadora,
+							IdRota,
+							DataReferencia
+					) pontos on p.IdTransportadora = pontos.IdTransportadora and p.IdRota = pontos.IdRota 
+					--and p.DataReferencia = pontos.DataReferencia
+				where
+					p.Excluido = 0
+					and (@IdTransportadora is null or p.IdTransportadora = @IdTransportadora)
+					and (
+						(@Idrota is null and p.DataReferencia >= @dtIni and (@dtFim is null or p.DataReferencia <= @dtFim))
+						or
+						(@IdRota is not null and p.IdRota = @Idrota)
+					)
+					and (isnull(p.SubStatus,'') not in('transferred')
+							 or isnull(p.SubStatus,'') not in('missing') and p.StatusParada = 'incomplete')
+
+				group by
+					p.IdTransportadora,
+					p.IdRota,
+					p.DataReferencia
+			) p on r.IdTransportadora = p.IdTransportadora and r.IdRota = p.IdRota 
+			--and r.DataReferencia = p.DataReferencia
+			left join (
+				select
+					IdTransportadora,
+					IdRota,
+					DataReferencia,
+					max(case when Ordem = 1 then StatusEntrega else null end) as StatusPrimeiraEntrega,
+					max(case when Ordem = 2 then StatusEntrega else null end) as StatusSegundaEntrega
+				from
+					(
+						select
+							IdTransportadora,
+							IdRota,
+							DataReferencia,
+							ROW_NUMBER() over(partition by IdTransportadora, IdRota, DataReferencia order by DataHoraEntrega, IdPacote) as Ordem,
+							t.tds_ds_traducao StatusEntrega
+						from
+							tb_ml_pacotes p with(nolock)
+							left join tb_ml_traducoes t with(nolock) on p.StatusEntrega = t.tds_vl_json and t.tds_nm_tabela = 'tb_ml_pacotes' and t.tds_nm_campo = 'StatusEntrega'
+						where
+							Excluido = 0
+							and (@IdTransportadora is null or p.IdTransportadora = @IdTransportadora)
+							and (
+								(@Idrota is null and p.DataReferencia >= @dtIni and (@dtFim is null or p.DataReferencia <= @dtFim))
+								or
+								(@IdRota is not null and p.IdRota = @Idrota)
+							)
+							and DataHoraEntrega >= DataReferencia 
+					) base
+				where
+					Ordem in (1,2)
+				group by
+					IdTransportadora,
+					IdRota,
+					DataReferencia
+			) p2 on r.IdTransportadora = p2.IdTransportadora and r.IdRota = p2.IdRota
+			--and r.DataReferencia = p2.DataReferencia
+			left join (
+				select 
+					distinct 
+					p.IdRota,
+					p.DataReferencia,
+					p.IdTransportadora,
+					r2.OrigemSaida 
+				from 
+					#pacotes_ambulancia p
+					join #rotas_ambulancia r2 with(nolock) on r2.IdRota = p.IdRotaOrigem and r2.IdTransportadora = p.IdTransportadora 
+					--and r2.DataReferencia = p.DataReferencia
+			) ambulancia on r.IdRota = ambulancia.IdRota and r.IdTransportadora = ambulancia.IdTransportadora
+			--and r.DataReferencia = ambulancia.DataReferencia 
+		where
+			(@IdTransportadora is null or r.IdTransportadora = @IdTransportadora)
+			and (
+				(@Idrota is null and r.DataReferencia >= @dtIni and (@dtFim is null or r.DataReferencia <= @dtFim))
+				or
+				(@IdRota is not null and r.IdRota = @Idrota)
+			)
+
+		
+		--quando é ambulancia, no mercado livre não vem a informação de xpt
+		--faz a atualização buscando a origemsaida da rota de origem
+		update
+			tb_ml_rotas
+		set
+			OrigemSaida = OrigemSaidaAmbulancia
+		where
+			(@IdTransportadora is null or IdTransportadora = @IdTransportadora)
+			and (
+				(@Idrota is null and DataReferencia >= @dtIni and (@dtFim is null or DataReferencia <= @dtFim))
+				or
+				(@IdRota is not null and IdRota = @Idrota)
+			)
+			and Ambulancia = 1
+			and isnull(OrigemSaida,'') = ''
+			and isnull(OrigemSaidaAmbulancia,'') <> ''
+
+
+		-- Atualiza coluna QuantidadePnr
+		DROP TABLE IF EXISTS #UPD_PRN
+
+		SELECT	ROT.IdRota,
+				COUNT(1)		AS QuantidadePnr
+		INTO #UPD_PRN
+		FROM tb_ml_rotas		 AS ROT (NOLOCK)
+		INNER JOIN tb_ml_pacotes AS PAC (NOLOCK) ON PAC.idtransportadora = ROT.IdTransportadora
+												AND PAC.idrota			 = ROT.idrota
+												--AND PAC.datareferencia	 = ROT.DataReferencia
+		INNER JOIN tb_ml_pnr	 AS PNR (NOLOCK) ON PNR.idpacote		 = PAC.idpacote 
+												AND PNR.motorista		 = ROT.nomemotorista
+ 
+		WHERE ROT.Excluido = 0
+			AND PAC.excluido = 0
+			AND isnull(PAC.SubStatus,'') <> 'transferred'
+			and (@IdTransportadora is null or ROT.IdTransportadora = @IdTransportadora)
+			and (
+					(@Idrota is null and ROT.DataReferencia >= @dtIni and (@dtFim is null or ROT.DataReferencia <= @dtFim))
+					or
+					(@IdRota is not null and ROT.IdRota = @Idrota)
+				)
+		GROUP BY ROT.IdRota
+
+		UPDATE ROT
+		SET QuantidadePnr = UPD.QuantidadePnr
+		FROM tb_ml_rotas	AS ROT
+		INNER JOIN #UPD_PRN AS UPD ON UPD.IdRota = ROT.IdRota
+		WHERE UPD.IdRota IS NOT NULL
+
+
+	--==========================================================================
+	-- CU-86akpq9ny: classificacao 'Coleta' por pacote (tenant 27)
+	-- Rotas do cliente 27 (tb_clientes.cli_cd_codigo_cliente) que possuam ao
+	-- menos um pacote com o label 'Coleta' em vw_pacotes — condicao
+	-- 'coletado em rota' (StatusEntrega='not_delivered', SubStatus<>'transferred'
+	-- e ponto stop/stop_place_prepared/pickup) traduzida via
+	-- tb_ml_status_entrega_traducao (StatusEntrega='coletado_em_rota') —
+	-- recebem TipoRota = 'Coleta'. Idempotente: so grava quando diferente.
+	--==========================================================================
+	update
+		r
+	set
+		r.TipoRota = 'Coleta'
+	from
+		tb_ml_rotas r
+		join tb_clientes cli with(nolock)
+			on cli.cli_id_logistics = r.IdTransportadora
+			and cli.cli_in_ativo = 1
+			and cli.cli_cd_codigo_cliente = 27
+		join tb_ml_status_entrega_traducao tcer with(nolock)
+			on tcer.TenantID = cli.cli_cd_codigo_cliente
+			and tcer.StatusEntrega = 'coletado_em_rota'
+			and tcer.SubStatus is null
+			and tcer.StatusEntregaTraduzido = 'Coleta'
+	where
+		r.Excluido = 0
+		and isnull(r.TipoRota,'') <> 'Coleta'
+		and (@IdTransportadora is null or r.IdTransportadora = @IdTransportadora)
+		and (
+				(@Idrota is null and r.DataReferencia >= @dtIni and (@dtFim is null or r.DataReferencia <= @dtFim))
+				or
+				(@IdRota is not null and r.IdRota = @Idrota)
+			)
+		and exists (
+			select
+				1
+			from
+				tb_ml_pacotes p with(nolock)
+			where
+				p.IdTransportadora = r.IdTransportadora
+				and p.IdRota = r.IdRota
+				and p.Excluido = 0
+				and p.StatusEntrega = 'not_delivered'
+				and isnull(p.SubStatus,'') <> 'transferred'
+				and (p.Status in ('stop','stop_place_prepared') or isnull(p.TipoPonto,'') = 'pickup')
+		)
+
+	end
+GO
+
+CREATE OR ALTER view [dbo].[vw_rotas]
+as
+select 
+distinct 
+r.IdTransportadora,
+r.Id,
+r.IdRota,
+r.DataReferencia ,
+r.DataHoraInicio,
+r.TempoPlanejadoMinutos,
+isnull(t2.tds_ds_traducao,r.StatusRota) as StatusRota,
+t4.tds_ds_traducao SubStatusRota,
+t3.tds_ds_traducao StatusPrazo,
+isnull(svc.svc_cd_service_center,r.ServiceCenter) ServiceCenter,
+svc.svc_nm_service_center NomeServiceCenter,
+coalesce(b.bss_ds_nome,svc.svc_cd_service_center,r.ServiceCenter) Base,
+--coalesce(b.dab_nm_base,svc.svc_cd_service_center,r.ServiceCenter) Base, -- Matheus 20/10/2025 alterado para pegar da tb_bases
+isnull(b.bss_ds_cidade,svc.svc_nm_cidade) CidadeBase,
+--isnull(b.dab_nm_cidade,svc.svc_nm_cidade) CidadeBase, -- Matheus 20/10/2025 alterado para pegar da tb_bases
+r.TipoOrigemSaida,
+--case when svc.svc_in_ambulancia = 1 and r.TipoRota is null then svc.svc_ds_origem_base else r.OrigemSaida end OrigemSaida,
+CASE WHEN r.IdTransportadora = '2087146923' and svc.svc_in_ambulancia = 1 and r.TipoRota is null THEN r.OrigemSaida
+WHEN svc.svc_in_ambulancia = 1 AND r.TipoRota IS NULL THEN svc.svc_ds_origem_base
+    ELSE isnull(r.OrigemSaida,r.ServiceCenter) -- ALTERADO POR MURILO 08/06 SOLICITAÇÃO DA ISADORA PARA QUANDO NÃO HOUVER XPT, APARECER O SVC
+END AS OrigemSaida,
+r.TipoRota,
+r.TipoVeiculo,
+COALESCE(NULLIF(LTRIM(RTRIM(r.nomemotorista)), ''), '-') AS NomeMotorista,
+mot_cd_motorista as IdMotorista,
+mot_cd_usuario as Codigo_usuario_motorista,
+CASE 
+    WHEN LTRIM(RTRIM(r.Placa)) = '' THEN '-'
+    ELSE isnull(r.Placa,'-')
+END AS Placa, -- Ajustado para destravar atualização de relatórios. Será necessária tratativa direta nas cargas da tabela para não termos valores nulos e em branco
+t1.tds_ds_traducao NivelExperienciaMotorista,
+r.IdNivelMotorista,
+case 
+when r.NivelMotorista = 'Platino' then 'Platina'
+when r.NivelMotorista = 'Oro' then 'Ouro'
+when r.NivelMotorista = 'Plata' then 'Prata'
+when r.NivelMotorista = 'Bronce' then 'Bronze'
+else r.NivelMotorista end NivelMotorista,
+r.QuantidadePacotesTransportados,
+r.PercentualEntregasBemSucedidas,
+r.PercentualEntregasSemRelamacaoes,
+r.PossuiAjudante,
+case when r.PossuiAjudante = 1 then 'Sim' else 'Não' end Ajudante,
+    isnull(
+case  
+when 
+case when KmColetadoApp = 0 then kms.pontosRotasPacotesKm else KmColetadoApp end = 0
+then 1 
+else 
+case when KmColetadoApp = 0 then kms.pontosRotasPacotesKm else KmColetadoApp end
+end
+
+,1)  AS KmColetado,
+--isnull(case when KmColetadoApp = 0 then KmColetado else KmColetadoApp end,1)  AS KmColetado,
+    r.LinkAppInterno AS LinkMapa,
+r.UsouAPP,
+r.UsuarioDA,
+CASE WHEN isnull(svc.svc_cd_service_center,r.ServiceCenter) ='SSP45' AND r.idtransportadora = 1491631999 then 'Itaquera'
+ WHEN isnull(svc.svc_cd_service_center,r.ServiceCenter) ='SSP21' AND r.idtransportadora = 1491631999 then 'São Paulo' 
+else replace(CidadeDistante,'Distrito de ','') end as CidadeDistante,
+r.TotalPacotes,
+r.PacotesEntregues,
+r.PacotesPendentes,
+r.PacotesNaoEntregue,
+r.PacotesEntreguesForaAreaEntrega,
+r.PacotesTransferidos,
+r.TempoEmRota,
+r.TempoChegadaAreaEntrega,
+r.TempoAreaEntrega,
+r.PercentualProgresso,
+--r.KmTotal, Atualizado para exibir kilometragem correta do Silos.
+--CASE 
+--    WHEN r.DataReferencia >= '2025-07-15' THEN r.KmLogistics
+--    ELSE r.KmTotal
+--END AS KmTotal
+CAST(
+    COALESCE(
+        TRY_CONVERT(decimal(18,4), KMLogistics),
+        TRY_CONVERT(decimal(18,4), r.KMTotal)
+    ) 
+AS decimal(18,4)) AS KmTotal
+
+,r.TempoEmRota * 60.0 TempoEmRotaSec,
+case when PacotesEntregues = 0 then 0 else cast(datediff(second, r.DataPrimeiraEntrega, r.DataUltimaAtualizacaoPacote) as float) / cast(r.PacotesEntregues as float) end SegundosEntreEntregas,
+case when r.TotalPacotes = r.PacotesEntregues+ r.PacotesNaoEntregue + r.PacotesTransferidos or r.TotalPacotes = r.PacotesEntregues + r.PacotesNaoEntregue or (r.StatusRota = 'planned' and r.DataReferencia < cast(getdate() as date)) then 1 else 0 end RotaFinalizada,
+case when r.TotalPacotes = r.PacotesEntregues + r.PacotesNaoEntregue + r.PacotesTransferidos or r.TotalPacotes = r.PacotesEntregues + r.PacotesNaoEntregue or (r.StatusRota = 'planned' and r.DataReferencia < cast(getdate() as date)) then 'Finalizada' else 'Em andamento' end StatusGeralRota,
+r.QuantidadePontos,
+r.QuantidadeParadas,
+r.QuantidadeReclamacoes,
+--case when r.QuantidadeAmbulancia > 0 then 1 else 0 end QuantidadeAmbulancia,
+isnull(r.QuantidadeAmbulancia,0) as QuantidadeAmbulancia ,
+r.StatusPrimeiraEntrega,
+r.StatusSegundaEntrega,
+r.DataPrimeiraEntrega,
+r.DataUltimaEntrega,
+r.Cidades,
+r.CidadeReferencia,
+isnull(r.KmColetado,0) KmColetadoMeli,
+r.LinkMapa LinkMapaMeli,
+kms.pontosAppRotasTotalKm KmColetadoAPP,
+--isnull(case when r.KmColetadoApp = 0 then r.KmMapaPacote else r.KmColetadoApp end,1)  AS KmColetadoAPP,
+r.LinkMapaApp,
+    -- r.Ambulancia
+case when r.TipoRota is null or ambulancia = 1  then 'Sim' else 'Não' end AmbulanciaFiltro,
+
+case when r.TipoRota is null or ambulancia = 1 then 1 else 0 end Ambulancia,
+
+r.KmMotorista,
+r.QuantidadeApontamento,
+r.Apuracao,
+format(r.DataPrimeiraEntrega, 'HH:mm') AS HoraInicio,
+case when DATEPART(hour,r.DataPrimeiraEntrega) < 12 then 'AM'
+  WHEN FORMAT(r.DataPrimeiraEntrega, 'HH:mm') BETWEEN '15:40' AND '17:30' THEN 'SD'
+  ELSE 'PM' end Ciclo,
+
+-- inclusão do indicador de tempo desde a ultima rota para corrigir o alerta no monitoramento de entregas
+CASE WHEN r.TotalPacotes = r.PacotesEntregues + r.PacotesNaoEntregue + r.PacotesTransferidos OR r.TotalPacotes = r.PacotesEntregues + r.PacotesNaoEntregue OR (r.StatusRota = 'planned' AND r.DataReferencia < CAST(GETDATE() AS DATE)) THEN 0 
+ WHEN DataReferencia = CAST(GETDATE() AS DATE) AND DATEDIFF(MINUTE, DataUltimaEntrega, GETDATE()) > 40 THEN 2 
+ WHEN DataReferencia = CAST(GETDATE() AS DATE) AND DATEDIFF(MINUTE, DataUltimaEntrega, GETDATE()) between 30 and 40   THEN 1 ELSE 0 END AS AlarmeRotaEntregaAtraso,
+
+CASE 
+    WHEN (r.TotalPacotes = r.PacotesEntregues + r.PacotesNaoEntregue + r.PacotesTransferidos 
+          OR r.TotalPacotes = r.PacotesEntregues + r.PacotesNaoEntregue 
+          OR (r.StatusRota = 'planned' AND r.DataReferencia < CAST(GETDATE() AS DATE))) THEN 'Sem Atrasos'
+    WHEN r.DataReferencia = CAST(GETDATE() AS DATE) 
+         AND DATEDIFF(MINUTE, r.DataUltimaEntrega, GETDATE()) >= 30 THEN 'Atrasos'
+    ELSE 'Sem Atrasos'
+END AS AlarmeRotaEntregaAtrasoFiltro,
+
+--case when DataReferencia = cast(getdate() as date) and datediff(minute,DataUltimaEntrega,getdate()) > 30 
+--and case when r.TotalPacotes = r.PacotesEntregues + r.PacotesNaoEntregue + r.PacotesTransferidos or r.TotalPacotes = r.PacotesEntregues + r.PacotesNaoEntregue or 
+--(r.StatusRota = 'planned' and r.DataReferencia < cast(getdate() as date)) then 1 else 0 end = 0 then 'Atrasos' else 'Sem Atrasos' end AlarmeRotaEntregaAtrasoFiltro,
+r.FaixaPrimeiroUltimoPacote,    
+r.TempoInativo,
+    'LM' tipo,
+    'https://envios.adminml.com/logistics/monitoring-distribution/detail/' + cast(r.IdRota as varchar(15)) + 'site=MLB' LogisticsRota
+    ,'A: ' + cast(isnull(QuantidadeReclamacoesAbertas,0) as varchar(5)) +  ' | F: ' + cast(isnull(QuantidadeReclamacoesFechadas,0) as varchar(5)) Reclamacores
+
+--Esta condição abaixo é para a visão de alterar o monitoramento MELI de base p/ XPT
+--Atualizado. Lógica de XPT incompleta.
+   -- ,case when r.OrigemSaida = '' OR r.OrigemSaida is null then isnull(svc.svc_cd_service_center,r.ServiceCenter) else r.OrigemSaida end CodOrigemSaida
+  , CASE
+  WHEN r.OrigemSaida IS NULL
+    OR r.OrigemSaida = ''
+    OR r.ServiceCenter <> r.OrigemSaida
+  THEN ISNULL(svc.svc_cd_service_center, r.ServiceCenter)
+  ELSE r.OrigemSaida
+END AS CodOrigemSaida
+
+    ,case when r.OrigemSaida = '' OR r.OrigemSaida is null then svc.svc_nm_service_center else  svc.svc_nm_sigla  end DescOrigemSaida
+
+--Esta condicao é para cria uma classificação para ser utilizado no monitoramento MELI
+    ,case
+        when r.TempoEmRota - r.TempoAreaEntrega <= 30   then    'Até 30m'
+        when r.TempoEmRota - r.TempoAreaEntrega <= 60   then    '30m a 1h'
+        when r.TempoEmRota - r.TempoAreaEntrega <= 90   then    '1h a 1h30m'
+        when r.TempoEmRota - r.TempoAreaEntrega <= 120  then    '1h30m a 2h'
+        when r.TempoEmRota - r.TempoAreaEntrega <= 150  then    '2h a 2h30m'
+        when r.TempoEmRota - r.TempoAreaEntrega <= 180  then    '2h30m a 3h'
+        when r.TempoEmRota - r.TempoAreaEntrega <= 210  then    '3h a 3h30m'
+        when r.TempoEmRota - r.TempoAreaEntrega <= 240  then    '3h30m a 4h'
+        when r.TempoEmRota - r.TempoAreaEntrega <= 270  then    '4h a 4h30m'
+        when r.TempoEmRota - r.TempoAreaEntrega <= 300  then    '4h30m a 5h'
+        when r.TempoEmRota - r.TempoAreaEntrega <= 330  then    '5h a 5h30m'
+        when r.TempoEmRota - r.TempoAreaEntrega <= 360  then    '5h30m a 6h'
+        when r.TempoEmRota - r.TempoAreaEntrega >  360  then    'Mais que 6h'
+            end as ClassificacaoStemOut,
+svc.bss_ds_label,
+isnull(isnull(svc.svc_cd_service_center,r.ServiceCenter) + ' - ' + svc.svc_nm_cidade
+,isnull(svc.svc_cd_service_center,r.ServiceCenter)
+) Svc_Cidade,
+svc.svc_nm_estado as Estado,
+IdTrevo,
+--CidadeDistante,
+case 
+when left(r.tiporota,1) = 'r' then 'Sim' 
+when tlm_cd_risco_ajudante = 'risco' then 'Sim' 
+else 'Não' end as LancRisco,
+    LinkPacote,
+    kms.pontosRotasPacotesKm as  KmMapaPacote,
+    case 
+        when  veiculo.vei_in_frota_fixa = 3     then 'Própria - Veículo da transportadora'
+        when  veiculo.vei_in_frota_fixa = 2     then 'Fixa - Veículo alugado'
+        when  veiculo.vei_in_frota_fixa = 1     then 'Spot - Veículo do motorista'
+        else 'Não informado'        
+    end as CategoriaVeiculo,
+    TotalPacotes - QuantidadeAmbulancia as PacotesDS,
+cast(isnull(QuantidadeReclamacoesAbertas,0) as varchar(5))+ '/' + cast((isnull(QuantidadeReclamacoesFechadas,0)+isnull(QuantidadeReclamacoesAbertas,0)) as varchar(5)) ReclamacoesAbertasPeloTotalReclamacoes
+,CASE
+        WHEN FORMAT(r.DataHoraInicio, 'HH:mm') BETWEEN '15:40' AND '17:30' THEN 'TRUE'
+        ELSE 'FALSE'
+    END AS FlagSEMIDAY,
+r.TotalSacas,
+CASE WHEN ServiceCenter = 'SSP27' THEN OrigemSaida
+ELSE ServiceCenter  end AS NovoXPT,
+TotalPacotes - TotalSacas as PacotesSemSacas,
+
+ISNULL(tratativas.PacotesComImagem,0) as PacotesComImagem
+,vei_Cd_ano
+,r.DataAtualizacao -- CAMPO USADO NA API DE MONITORAMENTO
+,r.EnderecosVisitados
+,r.TeveAcaoGps
+,svc.svc_nm_region
+,ISNULL(QuantidadeReclamacoesAbertas,0) AS QTD_Reclamacoes_em_aberto
+,ISNULL(QuantidadeReclamacoes,0) as QTD_Reclamacoes_total
+,vei_dh_criacao
+,r.QuantidadePnr
+--campos acrescentados para incluir ambulancias looker no relatório de monitoramento
+,AmbulanciaStatus
+,AmbulanciaPagamento
+,AmbulanciaIdMotorista
+,TipoFrota
+,rtt.KmTotal as KM_Rtt
+,cast(trevo.bkt_vl_km_ideal as DECIMAL(10,2)) as KM_Trevo
+,     DataHoraSaidaEstacao
+
+    ,CASE 
+    WHEN isnull(bss_regra_sd,1) = 1 THEN
+        CASE 
+            WHEN r.IdTransportadora = 643493085 THEN
+                CASE 
+                    WHEN LOWER(ISNULL(r.TipoOrigemSaida,'')) = 'nex' THEN
+                        CASE 
+                            WHEN DATEPART(HOUR, COALESCE(r.DataHoraSaidaEstacao, r.DataHoraInicio)) < 12 THEN 'AM'
+                            WHEN FORMAT(COALESCE(r.DataHoraSaidaEstacao, r.DataHoraInicio), 'HH:mm') BETWEEN '15:40' AND '17:30' THEN 'SD'
+                            ELSE 'PM'
+                        END
+                    ELSE
+                        CASE 
+                            WHEN DATEPART(HOUR, r.DataHoraInicio) < 12 THEN 'AM'
+                            WHEN FORMAT(r.DataHoraInicio, 'HH:mm') BETWEEN '15:40' AND '17:30' THEN 'SD'
+                            ELSE 'PM'
+                        END
+                END
+            ELSE
+                CASE 
+                    WHEN r.DataHoraSaidaEstacao IS NOT NULL THEN
+                        CASE 
+                            WHEN DATEPART(HOUR, r.DataHoraSaidaEstacao) < 12 THEN 'AM'
+                            WHEN FORMAT(r.DataHoraSaidaEstacao, 'HH:mm') BETWEEN '15:40' AND '17:30' THEN 'SD'
+                            ELSE 'PM'
+                        END
+                    ELSE
+                        CASE 
+                            WHEN DATEPART(HOUR, r.DataPrimeiraEntrega) < 12 THEN 'AM'
+                            WHEN FORMAT(r.DataPrimeiraEntrega, 'HH:mm') BETWEEN '15:40' AND '17:30' THEN 'SD'
+                            ELSE 'PM'
+                        END
+                END
+        END
+
+    WHEN isnull(bss_regra_sd,1) = 2 THEN
+        CASE 
+            WHEN r.IdTransportadora = 643493085 THEN
+                CASE 
+                    WHEN r.TipoRota like '%SD%' THEN 'SD'
+                    WHEN LOWER(ISNULL(r.TipoOrigemSaida,'')) = 'nex' THEN
+                        CASE WHEN DATEPART(HOUR, COALESCE(r.DataHoraSaidaEstacao, r.DataHoraInicio)) < 12 THEN 'AM' ELSE 'PM' END
+                    ELSE
+                        CASE WHEN DATEPART(HOUR, r.DataHoraInicio) < 12 THEN 'AM' ELSE 'PM' END
+                END
+            ELSE
+                CASE 
+                    WHEN r.DataHoraSaidaEstacao IS NOT NULL THEN
+                        CASE 
+                            WHEN r.TipoRota like '%SD%' THEN 'SD'
+                            WHEN DATEPART(HOUR, r.DataHoraSaidaEstacao) < 12 THEN 'AM'
+                            ELSE 'PM'
+                        END
+                    ELSE
+                        CASE 
+                            WHEN r.TipoRota like '%SD%' THEN 'SD'
+                            WHEN DATEPART(HOUR, r.DataPrimeiraEntrega) < 12 THEN 'AM'
+                            ELSE 'PM'
+                        END
+                END
+        END
+
+    WHEN isnull(bss_regra_sd,1) = 3 THEN
+        CASE 
+            WHEN r.IdTransportadora = 643493085 THEN
+                CASE 
+                    WHEN LOWER(ISNULL(r.TipoOrigemSaida,'')) = 'nex' THEN
+                        CASE
+                            WHEN (FORMAT(COALESCE(r.DataHoraSaidaEstacao, r.DataHoraInicio), 'HH:mm') BETWEEN '15:40' AND '17:30') OR r.TipoRota like '%SD%' THEN 'SD'
+                            WHEN DATEPART(HOUR, COALESCE(r.DataHoraSaidaEstacao, r.DataHoraInicio)) < 12 THEN 'AM'
+                            ELSE 'PM'
+                        END
+                    ELSE
+                        CASE
+                            WHEN (FORMAT(r.DataHoraInicio, 'HH:mm') BETWEEN '15:40' AND '17:30') OR r.TipoRota like '%SD%' THEN 'SD'
+                            WHEN DATEPART(HOUR, r.DataHoraInicio) < 12 THEN 'AM'
+                            ELSE 'PM'
+                        END
+                END
+            ELSE
+                CASE 
+                    WHEN r.DataHoraSaidaEstacao IS NOT NULL THEN
+                        CASE 
+                            WHEN (FORMAT(r.DataHoraSaidaEstacao, 'HH:mm') BETWEEN '15:40' AND '17:30') or r.TipoRota like '%SD%' THEN 'SD'
+                            WHEN DATEPART(HOUR, r.DataHoraSaidaEstacao) < 12 THEN 'AM'
+                            ELSE 'PM'
+                        END
+                    ELSE
+                        CASE 
+                            WHEN (FORMAT(r.DataPrimeiraEntrega, 'HH:mm') BETWEEN '15:40' AND '17:30') or r.TipoRota like '%SD%' THEN 'SD'
+                            WHEN DATEPART(HOUR, r.DataPrimeiraEntrega) < 12 THEN 'AM'
+                            ELSE 'PM'
+                        END
+                END
+        END
+END AS Ciclo_Novo,
+
+
+CONVERT(varchar(8), DATEADD(SECOND,
+    DATEDIFF(SECOND, DataHoraSaidaEstacao, DataPrimeiraEntrega),
+    0), 108) AS StemOutReal
+,CASE
+    WHEN TipoRota IS NULL OR LTRIM(RTRIM(TipoRota)) = '' THEN ''
+    WHEN TipoRota = 'Coleta' THEN 'Coleta'
+    WHEN UPPER(LEFT(LTRIM(RTRIM(TipoRota)), 1)) IN ('S', 'U') THEN 'Rota Volumosa'
+    ELSE 'Rota Convencional'
+END AS TipoRotaClassificada
+
+,CONVERT(varchar(10), DataHoraSaidaEstacao, 103) + ' ' +
+CONVERT(varchar(8), DataHoraSaidaEstacao, 108) AS DataHoraSaidaEstacaoFormatada
+,CASE
+    WHEN r.IdTransportadora = 1726310024 THEN
+        CAST(PacotesEntregues AS decimal(18,6))
+        / NULLIF(
+            PacotesEntregues
+            + PacotesNaoEntregue
+            + PacotesPendentes
+            + PacotesTransferidos,
+            0
+        )
+
+    WHEN r.IdTransportadora <> 1726310024
+         AND Ambulancia = 0 THEN
+        CAST(PacotesEntregues AS decimal(18,6))
+        / NULLIF(
+            PacotesEntregues
+            + PacotesNaoEntregue
+            + PacotesPendentes
+            + PacotesTransferidos,
+            0
+        )
+
+    ELSE NULL
+END AS PercentualPerformance
+,r.DriverId
+,CASE 
+    WHEN isnull(bss_regra_sd,1) = 1 THEN
+        CASE 
+            WHEN r.IdTransportadora = 643493085 THEN
+                CASE 
+                    WHEN LOWER(ISNULL(r.TipoOrigemSaida,'')) = 'nex' THEN
+                        CASE 
+                            WHEN DATEPART(HOUR, COALESCE(r.DataHoraSaidaEstacao, r.DataHoraInicio)) < 12 THEN 'AM'
+                            WHEN FORMAT(COALESCE(r.DataHoraSaidaEstacao, r.DataHoraInicio), 'HH:mm') BETWEEN '15:40' AND '17:30' THEN 'SD'
+                            ELSE 'PM'
+                        END
+                    ELSE
+                        CASE 
+                            WHEN DATEPART(HOUR, r.DataHoraInicio) < 12 THEN 'AM'
+                            WHEN FORMAT(r.DataHoraInicio, 'HH:mm') BETWEEN '15:40' AND '17:30' THEN 'SD'
+                            ELSE 'PM'
+                        END
+                END
+            ELSE
+                CASE 
+                    WHEN r.DataHoraSaidaEstacao IS NOT NULL THEN
+                        CASE 
+                            WHEN DATEPART(HOUR, r.DataHoraSaidaEstacao) < 12 THEN 'AM'
+                            WHEN FORMAT(r.DataHoraSaidaEstacao, 'HH:mm') BETWEEN '15:40' AND '17:30' THEN 'SD'
+                            ELSE 'PM'
+                        END
+                    ELSE
+                        CASE 
+                            WHEN DATEPART(HOUR, r.DataPrimeiraEntrega) < 12 THEN 'AM'
+                            WHEN FORMAT(r.DataPrimeiraEntrega, 'HH:mm') BETWEEN '15:40' AND '17:30' THEN 'SD'
+                            ELSE 'PM'
+                        END
+                END
+        END
+
+    WHEN isnull(bss_regra_sd,1) = 2 THEN
+        CASE 
+            WHEN r.IdTransportadora = 643493085 THEN
+                CASE 
+                    WHEN r.TipoRota like '%SD%' THEN 'SD'
+                    WHEN LOWER(ISNULL(r.TipoOrigemSaida,'')) = 'nex' THEN
+                        CASE WHEN DATEPART(HOUR, COALESCE(r.DataHoraSaidaEstacao, r.DataHoraInicio)) < 12 THEN 'AM' ELSE 'PM' END
+                    ELSE
+                        CASE WHEN DATEPART(HOUR, r.DataHoraInicio) < 12 THEN 'AM' ELSE 'PM' END
+                END
+            ELSE
+                CASE 
+                    WHEN r.DataHoraSaidaEstacao IS NOT NULL THEN
+                        CASE 
+                            WHEN r.TipoRota like '%SD%' THEN 'SD'
+                            WHEN DATEPART(HOUR, r.DataHoraSaidaEstacao) < 12 THEN 'AM'
+                            ELSE 'PM'
+                        END
+                    ELSE
+                        CASE 
+                            WHEN r.TipoRota like '%SD%' THEN 'SD'
+                            WHEN DATEPART(HOUR, r.DataPrimeiraEntrega) < 12 THEN 'AM'
+                            ELSE 'PM'
+                        END
+                END
+        END
+
+    WHEN isnull(bss_regra_sd,1) = 3 THEN
+        CASE 
+            WHEN r.IdTransportadora = 643493085 THEN
+                CASE 
+                    WHEN LOWER(ISNULL(r.TipoOrigemSaida,'')) = 'nex' THEN
+                        CASE
+                            WHEN (FORMAT(COALESCE(r.DataHoraSaidaEstacao, r.DataHoraInicio), 'HH:mm') BETWEEN '15:40' AND '17:30') OR r.TipoRota like '%SD%' THEN 'SD'
+                            WHEN DATEPART(HOUR, COALESCE(r.DataHoraSaidaEstacao, r.DataHoraInicio)) < 12 THEN 'AM'
+                            ELSE 'PM'
+                        END
+                    ELSE
+                        CASE
+                            WHEN (FORMAT(r.DataHoraInicio, 'HH:mm') BETWEEN '15:40' AND '17:30') OR r.TipoRota like '%SD%' THEN 'SD'
+                            WHEN DATEPART(HOUR, r.DataHoraInicio) < 12 THEN 'AM'
+                            ELSE 'PM'
+                        END
+                END
+            ELSE
+                CASE 
+                    WHEN r.DataHoraSaidaEstacao IS NOT NULL THEN
+                        CASE 
+                            WHEN (FORMAT(r.DataHoraSaidaEstacao, 'HH:mm') BETWEEN '15:40' AND '17:30') or r.TipoRota like '%SD%' THEN 'SD'
+                            WHEN DATEPART(HOUR, r.DataHoraSaidaEstacao) < 12 THEN 'AM'
+                            ELSE 'PM'
+                        END
+                    ELSE
+                        CASE 
+                            WHEN (FORMAT(r.DataPrimeiraEntrega, 'HH:mm') BETWEEN '15:40' AND '17:30') or r.TipoRota like '%SD%' THEN 'SD'
+                            WHEN DATEPART(HOUR, r.DataPrimeiraEntrega) < 12 THEN 'AM'
+                            ELSE 'PM'
+                        END
+                END
+        END
+END AS Ciclo_Novo_fc
+
+
+
+
+
+from
+tb_ml_rotas r with (nolock)
+join (select max(id) as id from tb_ml_rotas (nolock) where Excluido = 0 group by IdRota, IdTransportadora) as ultimaPk on r.id = ultimaPk.id
+join tb_clientes cli with (nolock) on r.IdTransportadora = cli.cli_id_logistics and cli.cli_in_ativo = 1 ---and cli.cli_cd_codigo_cliente <> 7
+left join tb_ml_traducoes t1 with (nolock) on r.NivelExperienciaMotorista = t1.tds_vl_json and t1.tds_nm_tabela = 'tb_ml_rotas' and t1.tds_nm_campo = 'NivelExperienciaMotorista'
+left join tb_ml_traducoes t2 with (nolock) on r.StatusRota = t2.tds_vl_json and t2.tds_nm_tabela = 'tb_ml_rotas' and t2.tds_nm_campo = 'StatusRota'
+left join tb_ml_traducoes t3 with (nolock) on r.StatusPrazo = t3.tds_vl_json and t3.tds_nm_tabela = 'tb_ml_rotas' and t3.tds_nm_campo = 'StatusPrazo'
+left join tb_ml_traducoes t4 with (nolock) on r.SubStatusRota = t4.tds_vl_json and t4.tds_nm_tabela = 'tb_ml_rotas' and t4.tds_nm_campo = 'SubStatusRota'
+left join (
+    select 
+        idrota,
+        idtransportadora,
+        COUNT(*) as PacotesComImagem
+    from 
+        tb_tratativas_entregas with (nolock)
+    where Imagem is not null
+    group by idrota, idtransportadora
+) tratativas
+on tratativas.idrota = r.IdRota and tratativas.idtransportadora = r.IdTransportadora
+--left join tb_novos_distritos distritos on distritos.nome_distrito = r.cidadedistante
+
+left join tb_ml_service_center svc with (nolock)
+on r.ServiceCenter = svc.svc_cd_service_center and r.idtransportadora = svc.idtransportadora
+
+left join (
+select 
+cli_id_logistics as IdTransportadora
+, mot_nm_motorista
+, max(mot_cd_motorista) as mot_cd_motorista -- tratamento para evitar duplicidade por erro de cadastro
+, max(mot_cd_usuario) as mot_cd_usuario
+from tb_motorista as a with (nolock)
+inner join tb_clientes as b with (nolock)
+on cli_cd_codigo_cliente = mot_cd_cliente
+group by cli_id_logistics,
+ mot_nm_motorista
+) as mot
+on r.IdTransportadora = mot.IdTransportadora
+and r.nomemotorista = mot.mot_nm_motorista
+
+left join tb_ml_service_center svc2 with (nolock)
+on case when isnull(r.OrigemSaida,'') <> '' then r.OrigemSaida else r.ServiceCenter end = svc2.svc_cd_service_center
+and r.idtransportadora = svc2.idtransportadora
+LEFT JOIN (
+    SELECT *
+    FROM (
+        SELECT *,
+               ROW_NUMBER() OVER (PARTITION BY idrota ORDER BY quinzena DESC) AS rn
+        FROM tb_ml_bsc_rtt WITH (NOLOCK)
+    ) AS sub
+    WHERE rn = 1
+) AS rtt ON rtt.idrota = r.idrota
+
+left join (
+select* 
+from tb_fin_base_km_trevo with (nolock)
+where bkt_cd_transportadora = 2087146923
+) trevo
+  on r.idtrevo = trevo.bkt_cd_base_km_trevo
+left join tb_bases b with (nolock) on isnull(svc2.svc_cd_service_center,svc.svc_cd_service_center) = b.bss_ds_sigla and r.IdTransportadora = b.bss_cd_idtransportadora
+--Inclusão da tabela de parametros para aplicar a regra de Restrição de bases 24/03/2026
+left join tb_parametros as par on par.prm_cod_cliente = cli.cli_cd_codigo_cliente and prm_nm_parametro = 'Visibilidade Padrão de Bases'
+--- Matheus 20/10/25 -- trocando para tb_bases por conta da cidade base
+--left join tb_dra_bases b with (nolock) on isnull(svc2.svc_cd_service_center,svc.svc_cd_service_center) = b.dab_cd_service_center and r.IdTransportadora = b.dab_cd_transportadora
+
+left join (
+select 
+a.tlm_cd_rota
+,a.tlm_cd_risco_ajudante
+
+from tb_lancamentos_manuais as a with (nolock)
+inner join (
+select 
+tlm_cd_lancamento_manual
+,tlm_cd_rota
+,ROW_NUMBER() over(partition by tlm_cd_rota order by tlm_cd_lancamento_manual desc) ordem
+from tb_lancamentos_manuais with (nolock)
+where tlm_cd_cliente = 27
+and tlm_cd_risco_ajudante = 'Risco'
+--and tlm_cd_rota = 'AT202405131ORMZ'
+) as b
+on a.tlm_cd_lancamento_manual = b.tlm_cd_lancamento_manual
+and b.ordem = 1
+) as lanc
+on cast(r.idrota as varchar(50)) = lanc.tlm_cd_rota
+
+    --Join com tb_veiculo para trazer o campo vei_in_frota_fixa , com ele categorizo o veiculo como Frota Fixa 1 , Agregado 2 ,Não Inforamdo Null
+left join (
+    select 
+        cli_id_logistics,
+        vei_ds_placa,
+        vei_cd_ano,
+        vei_in_frota_fixa,
+        vei_dh_criacao,
+        TipoFrota
+    from (
+        select 
+             b.cli_id_logistics,
+             a.vei_ds_placa,
+             a.vei_cd_ano,
+             isnull(a.vei_in_tipo_frota,0) as vei_in_frota_fixa,
+             a.vei_dh_criacao,
+             c.tf_nm_tipo_frota as TipoFrota,
+             row_number() over (
+                 partition by b.cli_id_logistics, a.vei_ds_placa
+                 order by a.vei_dh_criacao desc
+             ) as rn
+        from tb_veiculos a with (nolock)
+        inner join tb_clientes b with (nolock) 
+            on a.vei_cd_cliente = b.cli_cd_codigo_cliente
+        left join tb_tipo_frota c with (nolock) 
+            on a.vei_in_tipo_frota = c.tf_cd_tipo_frota
+        where a.vei_in_excluido = 0
+    ) x
+    where rn = 1
+) as veiculo
+    on r.idtransportadora = veiculo.cli_id_logistics 
+   and r.placa = veiculo.vei_ds_placa
+
+
+
+left join [tb_ml_processamento_km_rotas] as kms
+on r.idrota = kms.idrota
+
+--Esta join abaixo é para a visão de alterar o monitoramento MELI de base p/ XPT
+-- left join (
+--select 
+-- bss_ds_sigla
+--,bss_ds_label 
+--,bss_ds_nome 
+--from tb_bases 
+--where bss_ds_marketplace = 'Mercado Livre'
+--and bss_cd_base <> 7 
+--) c 
+--on r.servicecenter = c.bss_ds_sigla 
+
+---- Felipe Oliveira - 26/03/2025 - esse Join para trazer dados de ambulancia do Looker 
+--LEFT JOIN (
+--    SELECT 
+--         amb_id_rota,
+--         amb_data,
+--         amb_status,
+--         amb_pagamento,
+--         amb_id_motorista
+--    FROM (
+--SELECT  amb_id_rota,  amb_data, amb_status, amb_pagamento, amb_id_motorista,
+--             ROW_NUMBER() OVER (PARTITION BY amb_id_rota ORDER BY amb_data DESC) AS rn
+--         FROM [dbo].[tb_looker_ambulancias] WITH (NOLOCK)
+--        --WHERE amb_id_rota = 218963480
+--    ) AS sub
+--    WHERE rn = 1
+--) AS ambL
+--on r.DataReferencia = ambL.[amb_data]
+--and cast(r.idrota as varchar(50)) = ambL.[amb_id_rota][dbo].[tb_ml_processamento_km_rotas]
+
+
+
+where r.excluido = 0
+and StatusRota <> 'planned'
+
+--Incluído por Saulo Barros em 24/04/2025 para não considerar rotas que foram canceladas
+and isnull(SubStatusRota,'') <> 'cancelled'
+--and r.idrota not in (----- Efetuado ajuste por conta que estava excluindo rotas que não deveria - Matheus 20/10/25
+--    select idrota
+--    from (
+--        select   
+--            idrota,
+--            count(*) as qtd
+--        from tb_ml_rotas with(nolock)
+--        where DataReferencia = cast(getdate() as date)
+--          and DataInicioRota between cast(getdate()-15 as date) and cast(getdate() as date)
+--          and Excluido = 0
+--        group by idrota
+--        having count(*) > 1
+--    ) as a
+--)
+--AND (
+--       (r.IdTransportadora = 1387994348 AND
+--        NOT (
+--            r.TotalPacotes = r.PacotesEntregues + r.PacotesNaoEntregue + r.PacotesTransferidos -- ESPECÍFICO RODOPRIME. CONSIDERAM APENAS ROTAS ATIVAS
+--            OR r.TotalPacotes = r.PacotesEntregues + r.PacotesNaoEntregue
+--            OR (r.StatusRota = 'planned' AND r.DataReferencia < cast(getdate() as date))
+--        )
+--       )
+--       OR (r.IdTransportadora <> 1387994348)
+--     )
+--Fim 
+
+and (TotalPacotes > 0 or PacotesTransferidos > 0)
+and (
+1 = isnull(par.prm_ds_valor,1)
+ or (0 = isnull(par.prm_ds_valor,1)
+and isnull(b.bss_visibilidade,0) = 1 )
+)
+--and DataReferencia >= '2025-03-01'
+--and servicecenter  <> 'SC_ZS'
+--and r.idrota = 174194637
+
+
+union all
+
+select distinct 
+IdTransportadora
+,Id
+,IdRota
+,DataReferencia
+,null DataHoraInicio
+,null TempoPlanejadoMinutos
+,Status StatusRota
+,null SubStatusRota
+,null StatusPrazo
+,OrigemSaida ServiceCenter
+,NomeOrigemSaida NomeServiceCenter
+,OrigemSaida Base
+,null CidadeBase
+,null TipoOrigemSaida
+,OrigemSaida
+,TipoRota
+,TipoVeiculo
+,COALESCE(NULLIF(LTRIM(RTRIM(nomemotorista)), ''), '-') AS NomeMotorista
+
+,IdMotorista
+,null Codigo_usuario_motorista
+,isnull(PlacaVeiculo,'-') as PlacaVeiculo
+,null NivelExperienciaMotorista
+,null IdNivelMotorista
+,null NivelMotorista
+,null QuantidadePacotesTransportados
+,null PercentualEntregasBemSucedidas
+,null PercentualEntregasSemRelamacaoes
+,null PossuiAjudante
+,'Não' Ajudante
+,1 KmColetado
+,'-' LinkMapa
+,'Não' UsouAPP
+,UsuarioDA
+,null CidadeDistante
+,QuantidadePacotesColetados TotalPacotes
+,0 PacotesEntregues
+,0 PacotesPendentes
+,0 PacotesNaoEntregue
+,0 PacotesEntreguesForaAreaEntrega
+,null PacotesTransferidos
+,0 TempoEmRota
+,0 TempoChegadaAreaEntrega
+,0 TempoAreaEntrega
+,0 PercentualProgresso
+,KmPercorrido KmTotal
+,0 TempoEmRotaSec
+,null SegundosEntreEntregas
+,1 RotaFinalizada
+,'Finalizada' StatusGeralRota
+,0 QuantidadePontos
+,QuantidadeParadas
+,0 QuantidadeReclamacoes
+,0 QuantidadeAmbulancia
+,null StatusPrimeiraEntrega
+,null StatusSegundaEntrega
+,null DataPrimeiraEntrega
+,null DataUltimaEntrega
+,null Cidades
+,null CidadeReferencia
+,null KmColetadoMeli
+,null LinkMapaMeli
+,null KmColetadoAPP
+,null LinkMapaApp
+,null AmbulanciaFiltro
+,null Ambulancia
+,null KmMotorista
+,null QuantidadeApontamento
+,null Apuracao
+,null HoraInicio
+,null Ciclo
+,null AlarmeRotaEntregaAtraso
+,null AlarmeRotaEntregaAtrasoFiltro
+,null FaixaPrimeiroUltimoPacote
+,0 TempoInativo
+,'FM' tipo
+,null LogisticsRota
+,null Reclamacores
+,null CodOrigemSaida
+,null DescOrigemSaida
+,null ClassificacaoStemOut
+,null bss_ds_label
+,null Svc_Cidade
+,null Estado
+,null IdTrevo
+,null LancRisco
+,null LinkPacote
+,null KmMapaPacote
+,null CategoriaVeiculo
+,null PacotesDS
+,null ReclamacoesAbertasPeloTotalReclamacoes
+,null FlagSEMIDAY
+,null TotalSacas
+,null NovoXPT
+,null PacotesSemSacas
+,null PacotesComImagem
+,null vei_Cd_ano
+,null DataAtualizacao
+,null EnderecosVisitados
+,null TeveAcaoGps
+,null svc_nm_region
+,null QTD_Reclamacoes_em_aberto
+,null QTD_Reclamacoes_total
+,null as vei_dh_criacao
+,NULL AS QuantidadePnr
+--campos acrescentados para incluir ambulancias looker no relatório de monitoramento
+,AmbulanciaStatus= NULL 
+,AmbulanciaPagamento= NULL 
+,AmbulanciaIdMotorista= NULL 
+,null TipoFrota
+,null  as KM_Rtt
+,null as KM_Trevo
+,null as Datahorasaidaestacao
+,null as Ciclo_Novo
+,null as StemOutReal
+,null as  TipoRotaClassificada
+,null as DataHoraSaidaEstacaoFormatada
+,null AS PercentualPerformance
+,null as DriverId
+,null as teste
+
+from
+tb_ml_fm_rotas as rotas with (nolock)
+join tb_clientes cli with (nolock) on rotas.IdTransportadora = cli.cli_id_logistics and cli.cli_in_ativo = 1
+where
+Excluido = 0
+
+union all
+
+
+select distinct 
+IdTransportadora
+,Id
+,IdRota
+,DataReferencia
+,DataHoraInicio
+,null TempoPlanejadoMinutos
+,'Close' StatusRota
+,null SubStatusRota
+,null StatusPrazo
+,ServiceCenter ServiceCenter
+,ServiceCenter NomeServiceCenter
+,ServiceCenter Base
+,null CidadeBase
+,null TipoOrigemSaida
+,ServiceCenter OrigemSaida
+,'MeliOne'TipoRota
+,TipoVeiculo
+,COALESCE(NULLIF(LTRIM(RTRIM(nomemotorista)), ''), '-') AS NomeMotorista
+
+,null IdMotorista
+,null Codigo_usuario_motorista
+,isnull(PlacaVeiculo,'-') as PlacaVeiculo
+
+,null NivelExperienciaMotorista
+,null IdNivelMotorista
+,null NivelMotorista
+,null QuantidadePacotesTransportados
+,null PercentualEntregasBemSucedidas
+,null PercentualEntregasSemRelamacaoes
+,null Possuijudante
+,'Não' Ajudante
+,1 KmColetado
+,'-' LinkMapa
+,'Não' UsouAPP
+,UsuarioDA
+,null CidadeDistante
+,0 TotalPacotes
+,0 PacotesEntregues
+,0 PacotesPendentes
+,0 PacotesNaoEntregue
+,0 PacotesEntreguesForaAreaEntrega
+,null PacotesTransferidos
+,0 TempoEmRota
+,0 TempoChegadaAreaEntrega
+,0 TempoAreaEntrega
+,0 PercentualProgresso
+,0 KmTotal
+,0 TempoEmRotaSec
+,null SegundosEntreEntregas
+,1 RotaFinalizada
+,'Finalizada' StatusGeralRota
+,0 QuantidadePontos
+,0 QuantidadeParadas
+,0 QuantidadeReclamacoes
+,0 QuantidadeAmbulancia
+,null StatusPrimeiraEntrega
+,null StatusSegundaEntrega
+,null DataPrimeiraEntrega
+,null DataUltimaEntrega
+,null Cidades
+,null CidadeReferencia
+,null KmColetadoMeli
+,null LinkMapaMeli
+,null KmColetadoAPP
+,null LinkMapaApp
+,null AmbulanciaFiltro
+,null Ambulancia
+,null KmMotorista
+,null QuantidadeApontamento
+,null Apuracao
+,null HoraInicio
+,null Ciclo
+,null AlarmeRotaEntregaAtraso
+,null AlarmeRotaEntregaAtrasoFiltro
+,null FaixaPrimeiroUltimoPacote
+,0 TempoInativo
+,'MO' tipo
+,null LogisticsRota
+,null Reclamacores
+,null CodOrigemSaida
+,null DescOrigemSaida
+,null ClassificacaoStemOut
+,null bss_ds_label
+,null Svc_Cidade
+,null Estado
+,null IdTrevo
+,null LancRisco
+,null LinkPacote
+,null KmMapaPacote
+,null CategoriaVeiculo
+,null PacotesDS
+,null ReclamacoesAbertasPeloTotalReclamacoes
+,null FlagSEMIDAY
+,null TotalSacas
+,null NovoXPT
+,null PacotesSemSacas
+,null PacotesComImagem
+,null vei_Cd_ano
+,null DataAtualizacao
+,null EnderecosVisitados
+,null TeveAcaoGps
+,null svc_nm_region
+,null QTD_Reclamacoes_em_aberto
+,null QTD_Reclamacoes_total
+,null as vei_dh_criacao
+,NULL AS QuantidadePnr
+,null TipoFrota
+
+
+
+
+--campos acrescentados para incluir ambulancias looker no relatório de monitoramento
+,AmbulanciaStatus= NULL 
+,AmbulanciaPagamento= NULL 
+,AmbulanciaIdMotorista= NULL 
+,null  as KM_Rtt
+,null as KM_Trevo
+, null as Datahorasaidaestacao
+,null as Ciclo_Novo
+,null as StemOutReal
+,null as  TipoRotaClassificada
+,null as DataHoraSaidaEstacaoFormatada
+,null AS PercentualPerformance
+,null DriverId
+,null 
+
+from
+[tb_ml_mo_rotas] as rotas with (nolock)
+join tb_clientes cli with (nolock) on rotas.IdTransportadora = cli.cli_id_logistics and cli.cli_in_ativo = 1
+where
+Excluido = 0
+
+
+union all
+
+
+select distinct 
+IdTransportadora
+,Id
+,IdRota
+,DataReferencia
+,EtaOrigem DataHoraInicio
+,null TempoPlanejadoMinutos
+,StatusGeral  StatusRota
+,SubStatus SubStatusRota
+,null StatusPrazo
+,ServiceCenterDestino ServiceCenter
+,ServiceCenterDestino NomeServiceCenter
+,ServiceCenterDestino Base
+,b.bss_ds_cidade CidadeBase
+,null TipoOrigemSaida
+,null OrigemSaida
+,'MeliOne' TipoRota
+,TipoVeiculo
+,COALESCE(NULLIF(LTRIM(RTRIM(nomemotorista)), ''), '-') AS NomeMotorista
+
+,null IdMotorista
+,null Codigo_usuario_motorista
+,isnull(PlacaVeiculo1,'-') as PlacaVeiculo
+
+,null NivelExperienciaMotorista
+,null IdNivelMotorista
+,null NivelMotorista
+,null QuantidadePacotesTransportados
+,null PercentualEntregasBemSucedidas
+,null PercentualEntregasSemRelamacaoes
+,null PossuiAjudante
+,'Não' Ajudante
+,0 KmColetado
+,'-' LinkMapa
+,'Não' UsouAPP
+,UsuarioDA
+,null CidadeDistante
+,TotalPacotesOrigem TotalPacotes
+,TotalPacotesOrigem PacotesEntregues
+,0 PacotesPendentes
+,0 PacotesNaoEntregue
+,0 PacotesEntreguesForaAreaEntrega
+,null PacotesTransferidos
+,0 TempoEmRota
+,0 TempoChegadaAreaEntrega
+,0 TempoAreaEntrega
+,0 PercentualProgresso
+,0 KmTotal
+,0 TempoEmRotaSec
+,null SegundosEntreEntregas
+,1 RotaFinalizada
+,'Finalizada' StatusGeralRota
+,0 QuantidadePontos
+,0 QuantidadeParadas
+,0 QuantidadeReclamacoes
+,0 QuantidadeAmbulancia
+,null StatusPrimeiraEntrega
+,null StatusSegundaEntrega
+,null DataPrimeiraEntrega
+,null DataUltimaEntrega
+,null Cidades
+,null CidadeReferencia
+,null KmColetadoMeli
+,null LinkMapaMeli
+,null KmColetadoAPP
+,null LinkMapaApp
+,null AmbulanciaFiltro
+,null Ambulancia
+,null KmMotorista
+,null QuantidadeApontamento
+,null Apuracao
+,null HoraInicio
+,null Ciclo
+,null AlarmeRotaEntregaAtraso
+,null AlarmeRotaEntregaAtrasoFiltro
+,null FaixaPrimeiroUltimoPacote
+,0 TempoInativo
+,'LH' tipo
+,null LogisticsRota
+,null Reclamacores
+,null CodOrigemSaida
+,null DescOrigemSaida
+,null ClassificacaoStemOut
+,null bss_ds_label
+,null Svc_Cidade
+,null Estado
+,null IdTrevo
+,null LancRisco
+,null LinkPacote
+,null KmMapaPacote
+,null CategoriaVeiculo
+,null PacotesDS
+,null ReclamacoesAbertasPeloTotalReclamacoes
+,null FlagSEMIDAY
+,null TotalSacas
+,null NovoXPT
+,null PacotesSemSacas
+,null PacotesComImagem
+,null vei_Cd_ano
+,null DataAtualizacao
+,null EnderecosVisitados
+,null TeveAcaoGps
+,null svc_nm_region
+,null QTD_Reclamacoes_em_aberto
+,null QTD_Reclamacoes_total
+,null as vei_dh_criacao
+,NULL AS QuantidadePnr
+,null TipoFrota
+
+--campos acrescentados para incluir ambulancias looker no relatório de monitoramento
+,AmbulanciaStatus= NULL 
+,AmbulanciaPagamento= NULL 
+,AmbulanciaIdMotorista= NULL 
+,null  as KM_Rtt
+,null as KM_Trevo
+,null as Datahorasaidaestacao
+,null as Ciclo_Novo
+,null as StemOutReal
+,null as  TipoRotaClassificada
+,null as DataHoraSaidaEstacaoFormatada
+,null AS PercentualPerformance
+,null DriverId
+,null 
+from
+[tb_ml_lh_rotas] r with (nolock)
+join tb_clientes cli with (nolock) on r.IdTransportadora = cli.cli_id_logistics and cli.cli_in_ativo = 1
+left join tb_bases b with (nolock) on r.ServiceCenterDestino = b.bss_ds_sigla and r.IdTransportadora = b.bss_cd_idtransportadora
+where
+Excluido = 0
+and StatusGeral  <> 'pending'
+    and StatusGeral <> 'canceled' --adicionado por Saulo Barros em 23/06/2026 para não aparecer rotas cancelas
+GO
