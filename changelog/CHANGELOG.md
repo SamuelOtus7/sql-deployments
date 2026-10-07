@@ -63,3 +63,11 @@
 - **Commit:** 2ce9a19
 - **DescriÃ§Ã£o:** CU-86ak5qxm4: exclui pacotes transferred do TotalPacotes em tb_ml_rotas (#7)
 - **Rollback:** Para reverter, usar a tag `r20260916-CU86-2ce9a19` e executar o script de rollback correspondente.
+
+## r20261007-CU86-7557809
+
+- **Data:** 2026-10-07 18:25:45 +00:00
+- **Task ClickUp:** CU86
+- **Commit:** 7557809
+- **DescriÃ§Ã£o:** CU-86akt9utu: vincula Frota Fixa Campo Grande a unidade MS3 no SSW (#31)
+- **Rollback:** Para reverter, usar a tag `r20261007-CU86-7557809` e executar o script de rollback correspondente.
