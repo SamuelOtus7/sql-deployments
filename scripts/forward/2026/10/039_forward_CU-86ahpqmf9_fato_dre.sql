@@ -463,6 +463,7 @@ BEGIN
 
         ---------------------------------------------------------------
         -- c) ESPELHO: pagamento motorista (5.1.01, negativo)
+        --    somente espelhos com status "Pagamento efetuado" (tb_lista)
         --    mes = pgp_dt_inicio do periodo de pagamento
         ---------------------------------------------------------------
         INSERT INTO dbo.tb_fato_dre
@@ -482,6 +483,9 @@ BEGIN
             @orgEsp, 1, CONVERT(varchar(50), p.pgp_cd_periodo), NULL,
             -SUM(CONVERT(decimal(18,2), e.mtn_vl_nfs))
         FROM dbo.tb_pag_espelhos e WITH (NOLOCK)
+        JOIN dbo.tb_lista lst WITH (NOLOCK)
+            ON lst.lst_cd_lista = e.mtn_cd_status
+           AND lst.lst_ds_valor = ''Pagamento efetuado''
         JOIN dbo.tb_pgto_periodo p WITH (NOLOCK)
             ON p.pgp_cd_periodo = e.mtn_cd_pgto_periodo
         JOIN dbo.DimData dd ON dd.Data =
