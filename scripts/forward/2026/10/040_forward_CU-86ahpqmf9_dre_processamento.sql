@@ -96,24 +96,26 @@ BEGIN
     DECLARE @dhIni datetime = SYSDATETIME();
     DECLARE @IdProcessamento bigint;
     DECLARE @qt int = 0;
+    DECLARE @QuinzenaCarga tinyint = NULLIF(@Quinzena, 0);
 
     IF NOT EXISTS (SELECT 1 FROM dbo.tb_dim_visao
                    WHERE CodVisao = @CodVisao AND InAtivo = 1)
         THROW 50200, ''Visao inexistente ou inativa.'', 1;
 
     -------------------------------------------------------------
-    -- Upsert do periodo de processamento
+    -- Upsert do periodo de processamento (chave natural unica)
     -------------------------------------------------------------
-    MERGE dbo.tb_fin_dre_processamento WITH (HOLDLOCK) AS t
-    USING (SELECT @CodCliente AS CodCliente, @Ano AS Ano, @Mes AS Mes,
-                  @Quinzena AS Quinzena, @CodVisao AS CodVisao) s
-        ON  t.CodCliente = s.CodCliente AND t.Ano = s.Ano AND t.Mes = s.Mes
-        AND t.Quinzena = s.Quinzena AND t.CodVisao = s.CodVisao
-    WHEN MATCHED THEN
-        UPDATE SET Status = ''GERANDO'', DhGeracao = @dhIni,
-                   DhProcessado = NULL, UsuarioApp = @UsuarioApp, Erro = NULL
-    WHEN NOT MATCHED THEN
-        INSERT (CodCliente, Ano, Mes, Quinzena, CodVisao, Status, UsuarioApp)
+    IF EXISTS (SELECT 1 FROM dbo.tb_fin_dre_processamento
+               WHERE CodCliente = @CodCliente AND Ano = @Ano AND Mes = @Mes
+                 AND Quinzena = @Quinzena AND CodVisao = @CodVisao)
+        UPDATE dbo.tb_fin_dre_processamento
+        SET Status = ''GERANDO'', DhGeracao = @dhIni,
+            DhProcessado = NULL, UsuarioApp = @UsuarioApp, Erro = NULL
+        WHERE CodCliente = @CodCliente AND Ano = @Ano AND Mes = @Mes
+          AND Quinzena = @Quinzena AND CodVisao = @CodVisao;
+    ELSE
+        INSERT INTO dbo.tb_fin_dre_processamento
+            (CodCliente, Ano, Mes, Quinzena, CodVisao, Status, UsuarioApp)
         VALUES (@CodCliente, @Ano, @Mes, @Quinzena, @CodVisao, ''GERANDO'', @UsuarioApp);
 
     SELECT @IdProcessamento = IdProcessamento
@@ -129,7 +131,7 @@ BEGIN
         BEGIN
             EXEC dbo.sp_fin_dre_carga
                 @CodCliente = @CodCliente, @Ano = @Ano, @Mes = @Mes,
-                @Quinzena   = NULLIF(@Quinzena, 0);
+                @Quinzena   = @QuinzenaCarga;
 
             UPDATE dbo.tb_fin_dre_processamento
             SET Status = ''GERADO'', DhProcessado = SYSDATETIME()
