@@ -747,6 +747,14 @@ GO
 EXEC dbo.sp_fin_dre_carga_all;
 GO
 
+-- Permissao de execucao para o usuario do relatorio web (se existir no ambiente)
+IF EXISTS (SELECT 1 FROM sys.database_principals WHERE name = 'usr_relatorio_web')
+BEGIN
+    GRANT EXECUTE ON dbo.sp_fin_dre_carga     TO usr_relatorio_web;
+    GRANT EXECUTE ON dbo.sp_fin_dre_carga_all TO usr_relatorio_web;
+END
+GO
+
 --============================================================================
 -- 10. POS-CHECKS
 --============================================================================
