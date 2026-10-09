@@ -218,6 +218,7 @@ GO
 INSERT INTO dbo.tb_dim_dre_indicador (CodIndicador, NomeIndicador, Natureza) VALUES
     ('RB-SERV',  'Subtotal de servicos',              'C'),
     ('RB-ADIC',  'Subtotal de adicionais',            'C'),
+    ('RB-SUBT',  'Subtotal da pre-fatura (portal)',   'C'),
     ('DED-GLOSA','Ajuste/glosa ML',                   'D'),
     ('DED-LOST', 'Subtotal de Lost Packages Penalty', 'D'),
     ('DED-PNR',  'Subtotal de penalidades (PNR)',     'D'),
@@ -250,6 +251,7 @@ SELECT cod, nome, cat, sub, i.SkIndicador
 FROM (VALUES
     ('4.1.01','Receita de servicos ML','Receita','Servicos',      'RB-SERV'),
     ('4.1.02','Receita adicional (paradas/enderecos)','Receita','Adicionais','RB-ADIC'),
+    ('4.1.03','Subtotal da pre-fatura (portal)','Receita','Referencia','RB-SUBT'),
     ('4.2.01','Ajuste/glosa pre-fatura ML','Deducao','Glosa',     'DED-GLOSA'),
     ('4.2.02','Penalidade Lost Packages','Deducao','Penalidade',  'DED-LOST'),
     ('4.2.03','Penalidade PNR','Deducao','Penalidade',            'DED-PNR'),
@@ -279,7 +281,7 @@ FROM (VALUES
     ('RECEITA BRUTA',         1,  'ST-RB',    1, 'SERVICOS,ADICIONAIS,SUBTOTAL PREFATURA,GLOSA,PEN LOST,PEN PNR,PEN NV'),
     ('SERVICOS',              2,  'RB-SERV',  0, NULL),
     ('ADICIONAIS',            3,  'RB-ADIC',  0, NULL),
-    ('SUBTOTAL PREFATURA',    4,  NULL,       0, NULL),
+    ('SUBTOTAL PREFATURA',    4,  'RB-SUBT',  0, NULL),
     ('GLOSA',                 5,  'DED-GLOSA',0, NULL),
     ('PEN LOST',              6,  'DED-LOST', 0, NULL),
     ('PEN PNR',               7,  'DED-PNR',  0, NULL),
@@ -520,6 +522,32 @@ BEGIN
           AND t.Ano = @Ano AND t.Mes = @Mes
           AND (@Quinzena IS NULL OR t.Quinzena = @Quinzena)
           AND t.GlosaPrefatura IS NOT NULL AND t.GlosaPrefatura <> 0
+        GROUP BY dd.SkData, t.Ano, t.Mes, t.Quinzena, t.IDPrefatura;
+        SET @qt = @qt + @@ROWCOUNT;
+
+        ---------------------------------------------------------------
+        -- d2) SUBTOTAL PREFATURA PORTAL (4.1.03, RB-SUBT)
+        --     linha de referencia: origem TOTALIZADOR => nunca entra
+        --     na soma da arvore (filtro CodOrigem <> @orgTot)
+        ---------------------------------------------------------------
+        INSERT INTO dbo.tb_fato_dre
+            (SkData, Data, Ano, Mes, Quinzena, CodCliente, IdTransportadora,
+             CodContaContabil, SkIndicador, CodOrigem, CodVisao,
+             IdReferencia, Valor)
+        SELECT
+            dd.SkData,
+            DATEFROMPARTS(t.Ano, t.Mes, CASE WHEN t.Quinzena = 1 THEN 1 ELSE 16 END),
+            t.Ano, t.Mes, t.Quinzena, @CodCliente, @IdTransportadora,
+            ''4.1.03'', (SELECT SkIndicador FROM dbo.tb_dim_plano_contas
+                        WHERE CodContaContabil = ''4.1.03'' AND CodCliente = 0),
+            @orgTot, 1, t.IDPrefatura, SUM(t.SubtotalPrefatura)
+        FROM dbo.tb_fin_prefatura_totais t WITH (NOLOCK)
+        JOIN dbo.DimData dd ON dd.Data =
+            DATEFROMPARTS(t.Ano, t.Mes, CASE WHEN t.Quinzena = 1 THEN 1 ELSE 16 END)
+        WHERE t.IdTransportadora = @IdTransportadora
+          AND t.Ano = @Ano AND t.Mes = @Mes
+          AND (@Quinzena IS NULL OR t.Quinzena = @Quinzena)
+          AND t.SubtotalPrefatura IS NOT NULL
         GROUP BY dd.SkData, t.Ano, t.Mes, t.Quinzena, t.IDPrefatura;
         SET @qt = @qt + @@ROWCOUNT;
 
