@@ -45,6 +45,7 @@ GO
 --============================================================================
 -- 3. PROCEDURE E VIEW
 --============================================================================
+IF OBJECT_ID('dbo.sp_fin_dre_carga_all', 'P') IS NOT NULL DROP PROCEDURE dbo.sp_fin_dre_carga_all;
 IF OBJECT_ID('dbo.sp_fin_dre_carga', 'P') IS NOT NULL DROP PROCEDURE dbo.sp_fin_dre_carga;
 IF OBJECT_ID('dbo.vw_fin_fato_dre', 'V') IS NOT NULL DROP VIEW dbo.vw_fin_fato_dre;
 GO

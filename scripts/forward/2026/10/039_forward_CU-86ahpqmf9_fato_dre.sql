@@ -128,9 +128,9 @@ CREATE TABLE dbo.tb_dim_plano_contas (
     Categoria        varchar(100) NULL,
     Subcategoria     varchar(100) NULL,
     SkIndicador      int          NULL,
-    CodCliente       int          NULL,   -- NULL = conta global; preenchido = override por empresa
+    CodCliente       int          NOT NULL CONSTRAINT DF_dim_pc_cli DEFAULT (0), -- 0 = global; >0 = override por empresa
     InAtivo          bit          NOT NULL CONSTRAINT DF_dim_pc_ativo DEFAULT (1),
-    CONSTRAINT PK_dim_plano_contas PRIMARY KEY (CodContaContabil, CodCliente) ,
+    CONSTRAINT PK_dim_plano_contas PRIMARY KEY (CodContaContabil, CodCliente),
     CONSTRAINT FK_dim_pc_ind FOREIGN KEY (SkIndicador)
         REFERENCES dbo.tb_dim_dre_indicador (SkIndicador)
 );
@@ -269,7 +269,7 @@ FROM (VALUES
     ('5.5.02','Amortizacao','Despesa','Amortizacao',              'AMORT'),
     ('TOTAL','Totalizador (linha sintetica)','Sintetico','Total', NULL)
 ) v(cod, nome, cat, sub, ind)
-JOIN dbo.tb_dim_dre_indicador i ON i.CodIndicador = v.ind OR v.ind IS NULL;
+LEFT JOIN dbo.tb_dim_dre_indicador i ON i.CodIndicador = v.ind;
 GO
 
 -- Estrutura padrao da empresa 63 (COOMAP) — espelha o DRE do relatorio
@@ -330,9 +330,13 @@ JOIN dbo.tb_dim_origem o    WITH (NOLOCK) ON o.CodOrigem = f.CodOrigem
 JOIN dbo.tb_dim_visao vs    WITH (NOLOCK) ON vs.CodVisao = f.CodVisao
 LEFT JOIN dbo.tb_dim_marketplace mk WITH (NOLOCK) ON mk.CodMarketplace = f.CodMarketplace
 LEFT JOIN dbo.tb_bases b            WITH (NOLOCK) ON b.bss_cd_base = f.CodBase
-LEFT JOIN dbo.tb_dim_plano_contas pc WITH (NOLOCK)
-       ON pc.CodContaContabil = f.CodContaContabil
-      AND (pc.CodCliente = f.CodCliente OR pc.CodCliente IS NULL)
+OUTER APPLY (
+    SELECT TOP 1 pc2.CodContaContabil, pc2.ContaContabil
+    FROM dbo.tb_dim_plano_contas pc2 WITH (NOLOCK)
+    WHERE pc2.CodContaContabil = f.CodContaContabil
+      AND pc2.CodCliente IN (0, f.CodCliente) AND pc2.InAtivo = 1
+    ORDER BY pc2.CodCliente DESC
+) pc
 LEFT JOIN dbo.tb_dim_dre_indicador i WITH (NOLOCK) ON i.SkIndicador = f.SkIndicador
 ');
 GO
@@ -340,7 +344,7 @@ GO
 --============================================================================
 -- 7. PROCEDURE DE CARGA — sp_fin_dre_carga
 --    Idempotente por (CodCliente, Ano, Mes[, Quinzena]) e CodVisao=1.
---    Recria: PREFATURA, DESCONTO, ESPELHO, GLOSA(totalizador) e TOTALIZADOR.
+--    Recria: PREFATURA, DESCONTO (penalidades + glosa), ESPELHO e TOTALIZADOR.
 --============================================================================
 EXEC('
 CREATE PROCEDURE dbo.sp_fin_dre_carga
@@ -354,6 +358,7 @@ BEGIN
     DECLARE @dhIni datetime = SYSDATETIME();
     DECLARE @IdTransportadora bigint;
     DECLARE @orgPref smallint, @orgDesc smallint, @orgEsp smallint, @orgTot smallint;
+    DECLARE @qt int = 0;
 
     SELECT @IdTransportadora = cli_id_logistics
     FROM dbo.tb_clientes WITH (NOLOCK)
@@ -398,7 +403,7 @@ BEGIN
         FROM dbo.tb_fin_prefatura f WITH (NOLOCK)
         CROSS JOIN (VALUES (''4.1.01''), (''4.1.02'')) ct(conta)
         JOIN dbo.tb_dim_plano_contas pc ON pc.CodContaContabil = ct.conta
-                                       AND pc.CodCliente IS NULL AND pc.InAtivo = 1
+                                       AND pc.CodCliente = 0 AND pc.InAtivo = 1
         JOIN dbo.DimData dd ON dd.Data =
             DATEFROMPARTS(f.Ano, f.Mes, CASE WHEN f.Quinzena = 1 THEN 1 ELSE 16 END)
         OUTER APPLY (
@@ -413,7 +418,11 @@ BEGIN
           AND f.Ano = @Ano AND f.Mes = @Mes
           AND (@Quinzena IS NULL OR f.Quinzena = @Quinzena)
         GROUP BY dd.SkData, f.Ano, f.Mes, f.Quinzena, mk.CodMarketplace,
-                 b.bss_cd_base, pc.CodContaContabil, pc.SkIndicador, f.IdRota;
+                 b.bss_cd_base, pc.CodContaContabil, pc.SkIndicador, f.IdRota
+        HAVING CASE WHEN pc.CodContaContabil = ''4.1.01''
+                    THEN SUM(CONVERT(decimal(18,2), f.Total))
+                    ELSE SUM(CONVERT(decimal(18,2), f.VLParada)) END IS NOT NULL;
+        SET @qt = @qt + @@ROWCOUNT;
 
         ---------------------------------------------------------------
         -- b) DESCONTO: penalidades por tipo (valor negativo)
@@ -435,7 +444,7 @@ BEGIN
             SELECT IdTransportadora, Ano, Mes, Quinzena, Descricao, Total
             FROM dbo.tb_fin_prefatura_descontos_not_visited WITH (NOLOCK)
         ) x
-        JOIN dbo.tb_dim_plano_contas pc ON pc.CodCliente IS NULL AND pc.InAtivo = 1
+        JOIN dbo.tb_dim_plano_contas pc ON pc.CodCliente = 0 AND pc.InAtivo = 1
             AND pc.CodContaContabil = CASE
                 WHEN x.Descricao LIKE ''Lost Packages%''            THEN ''4.2.02''
                 WHEN x.Descricao LIKE ''Pnr Packages%''             THEN ''4.2.03''
@@ -446,7 +455,9 @@ BEGIN
         WHERE x.IdTransportadora = @IdTransportadora
           AND x.Ano = @Ano AND x.Mes = @Mes
           AND (@Quinzena IS NULL OR x.Quinzena = @Quinzena)
-        GROUP BY dd.SkData, x.Ano, x.Mes, x.Quinzena, pc.CodContaContabil, pc.SkIndicador;
+        GROUP BY dd.SkData, x.Ano, x.Mes, x.Quinzena, pc.CodContaContabil, pc.SkIndicador
+        HAVING SUM(ABS(CONVERT(decimal(18,2), x.Total))) IS NOT NULL;
+        SET @qt = @qt + @@ROWCOUNT;
 
         ---------------------------------------------------------------
         -- c) ESPELHO: pagamento motorista (5.1.01, negativo)
@@ -463,9 +474,9 @@ BEGIN
             YEAR(p.pgp_dt_inicio), MONTH(p.pgp_dt_inicio),
             CASE WHEN DAY(p.pgp_dt_inicio) <= 15 THEN 1 ELSE 2 END,
             @CodCliente, @IdTransportadora,
-            mk.CodMarketplace, e.mtn_cd_base,
+            mk.CodMarketplace, b.bss_cd_base,
             ''5.1.01'', (SELECT SkIndicador FROM dbo.tb_dim_plano_contas
-                        WHERE CodContaContabil = ''5.1.01'' AND CodCliente IS NULL),
+                        WHERE CodContaContabil = ''5.1.01'' AND CodCliente = 0),
             @orgEsp, 1, CONVERT(varchar(50), p.pgp_cd_periodo), NULL,
             -SUM(CONVERT(decimal(18,2), e.mtn_vl_nfs))
         FROM dbo.tb_pag_espelhos e WITH (NOLOCK)
@@ -484,7 +495,9 @@ BEGIN
                OR (CASE WHEN DAY(p.pgp_dt_inicio) <= 15 THEN 1 ELSE 2 END) = @Quinzena)
         GROUP BY dd.SkData, YEAR(p.pgp_dt_inicio), MONTH(p.pgp_dt_inicio),
                  CASE WHEN DAY(p.pgp_dt_inicio) <= 15 THEN 1 ELSE 2 END,
-                 mk.CodMarketplace, e.mtn_cd_base, p.pgp_cd_periodo;
+                 mk.CodMarketplace, b.bss_cd_base, p.pgp_cd_periodo
+        HAVING SUM(CONVERT(decimal(18,2), e.mtn_vl_nfs)) IS NOT NULL;
+        SET @qt = @qt + @@ROWCOUNT;
 
         ---------------------------------------------------------------
         -- d) GLOSA: ajuste ML (4.2.01, negativo) de tb_fin_prefatura_totais
@@ -498,8 +511,8 @@ BEGIN
             DATEFROMPARTS(t.Ano, t.Mes, CASE WHEN t.Quinzena = 1 THEN 1 ELSE 16 END),
             t.Ano, t.Mes, t.Quinzena, @CodCliente, @IdTransportadora,
             ''4.2.01'', (SELECT SkIndicador FROM dbo.tb_dim_plano_contas
-                        WHERE CodContaContabil = ''4.2.01'' AND CodCliente IS NULL),
-            @orgTot, 1, t.IDPrefatura, -SUM(t.GlosaPrefatura)
+                        WHERE CodContaContabil = ''4.2.01'' AND CodCliente = 0),
+            @orgDesc, 1, t.IDPrefatura, -SUM(t.GlosaPrefatura)
         FROM dbo.tb_fin_prefatura_totais t WITH (NOLOCK)
         JOIN dbo.DimData dd ON dd.Data =
             DATEFROMPARTS(t.Ano, t.Mes, CASE WHEN t.Quinzena = 1 THEN 1 ELSE 16 END)
@@ -508,6 +521,7 @@ BEGIN
           AND (@Quinzena IS NULL OR t.Quinzena = @Quinzena)
           AND t.GlosaPrefatura IS NOT NULL AND t.GlosaPrefatura <> 0
         GROUP BY dd.SkData, t.Ano, t.Mes, t.Quinzena, t.IDPrefatura;
+        SET @qt = @qt + @@ROWCOUNT;
 
         ---------------------------------------------------------------
         -- e) TOTALIZADOR: subtotais da arvore da empresa (GruposAgregadores)
@@ -550,14 +564,14 @@ BEGIN
         JOIN dbo.DimData dd ON dd.Data =
             DATEFROMPARTS(@Ano, @Mes, CASE WHEN f.Quinzena = 1 THEN 1 ELSE 16 END)
         GROUP BY dd.SkData, f.Quinzena, raiz.SkGrupo, raiz.SkIndicador;
+        SET @qt = @qt + @@ROWCOUNT;
 
         ---------------------------------------------------------------
         -- f) Log de carga
         ---------------------------------------------------------------
         INSERT INTO dbo.tb_fin_dre_carga_log
             (Ano, Mes, CodCliente, CodOrigem, CodVisao, QtLinhas, DhInicio, DhFim, Status)
-        SELECT @Ano, @Mes, @CodCliente, NULL, 1,
-               @@ROWCOUNT, @dhIni, SYSDATETIME(), ''OK'';
+        VALUES (@Ano, @Mes, @CodCliente, NULL, 1, @qt, @dhIni, SYSDATETIME(), ''OK'');
 
         COMMIT TRAN;
     END TRY
@@ -701,27 +715,36 @@ END
 GO
 
 --============================================================================
--- 9. BACKFILL INICIAL (visao Realizado) — todos os pares cliente x mes
+-- 9. PROC UTILITARIA + BACKFILL INICIAL (visao Realizado) — pares cliente x mes
 --============================================================================
-DECLARE @cli int, @a int, @m int;
-DECLARE cur CURSOR FAST_FORWARD FOR
-    SELECT DISTINCT c.cli_cd_codigo_cliente, f.Ano, f.Mes
-    FROM dbo.tb_fin_prefatura f WITH (NOLOCK)
-    JOIN dbo.tb_clientes c WITH (NOLOCK) ON c.cli_id_logistics = f.IdTransportadora
-    ORDER BY c.cli_cd_codigo_cliente, f.Ano, f.Mes;
-OPEN cur;
-FETCH NEXT FROM cur INTO @cli, @a, @m;
-WHILE @@FETCH_STATUS = 0
+EXEC('
+CREATE PROCEDURE dbo.sp_fin_dre_carga_all AS
 BEGIN
-    BEGIN TRY
-        EXEC dbo.sp_fin_dre_carga @CodCliente = @cli, @Ano = @a, @Mes = @m;
-    END TRY
-    BEGIN CATCH
-        PRINT 'Carga falhou: cliente ' + CAST(@cli AS varchar) + ' ' + CAST(@a AS varchar) + '/' + CAST(@m AS varchar) + ' - ' + ERROR_MESSAGE();
-    END CATCH
+    SET NOCOUNT ON;
+    DECLARE @cli int, @a int, @m int;
+    DECLARE cur CURSOR FAST_FORWARD FOR
+        SELECT DISTINCT c.cli_cd_codigo_cliente, f.Ano, f.Mes
+        FROM dbo.tb_fin_prefatura f WITH (NOLOCK)
+        JOIN dbo.tb_clientes c WITH (NOLOCK) ON c.cli_id_logistics = f.IdTransportadora
+        ORDER BY c.cli_cd_codigo_cliente, f.Ano, f.Mes;
+    OPEN cur;
     FETCH NEXT FROM cur INTO @cli, @a, @m;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        BEGIN TRY
+            EXEC dbo.sp_fin_dre_carga @CodCliente = @cli, @Ano = @a, @Mes = @m;
+        END TRY
+        BEGIN CATCH
+            PRINT ''Carga falhou: cliente '' + CAST(@cli AS varchar) + '' '' + CAST(@a AS varchar) + ''/'' + CAST(@m AS varchar) + '' - '' + ERROR_MESSAGE();
+        END CATCH
+        FETCH NEXT FROM cur INTO @cli, @a, @m;
+    END
+    CLOSE cur; DEALLOCATE cur;
 END
-CLOSE cur; DEALLOCATE cur;
+');
+GO
+
+EXEC dbo.sp_fin_dre_carga_all;
 GO
 
 --============================================================================
